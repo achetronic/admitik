@@ -88,9 +88,9 @@ func policyWith(name string, priority int, resources ...v1alpha1.AdmissionResour
 	}
 }
 
-func resourceGroup(group, version, resource string, operations ...admissionregv1.OperationType) v1alpha1.AdmissionResourceGroupT {
+func resourceGroup(group, resource string, operations ...admissionregv1.OperationType) v1alpha1.AdmissionResourceGroupT {
 	return v1alpha1.AdmissionResourceGroupT{
-		GroupVersionResource: metav1.GroupVersionResource{Group: group, Version: version, Resource: resource},
+		GroupVersionResource: metav1.GroupVersionResource{Group: group, Version: "v1", Resource: resource},
 		Operations:           operations,
 	}
 }
@@ -108,13 +108,13 @@ func TestWatchedTypes(t *testing.T) {
 		},
 		{
 			name: "one resource with several operations",
-			policy: policyWith("one", 0, resourceGroup("", "v1", "namespaces",
+			policy: policyWith("one", 0, resourceGroup("", "namespaces",
 				admissionregv1.Create, admissionregv1.Update)),
 			expected: []string{"/v1/namespaces/CREATE", "/v1/namespaces/UPDATE"},
 		},
 		{
 			name: "the wildcard is expanded",
-			policy: policyWith("wildcard", 0, resourceGroup("apps", "v1", "deployments",
+			policy: policyWith("wildcard", 0, resourceGroup("apps", "deployments",
 				admissionregv1.OperationAll)),
 			expected: []string{
 				"apps/v1/deployments/CREATE",
@@ -125,15 +125,15 @@ func TestWatchedTypes(t *testing.T) {
 		},
 		{
 			name: "unsupported operations are skipped",
-			policy: policyWith("unsupported", 0, resourceGroup("", "v1", "secrets",
+			policy: policyWith("unsupported", 0, resourceGroup("", "secrets",
 				admissionregv1.Create, "NOPE")),
 			expected: []string{"/v1/secrets/CREATE"},
 		},
 		{
 			name: "the same resource twice is not duplicated",
 			policy: policyWith("duplicated", 0,
-				resourceGroup("", "v1", "configmaps", admissionregv1.Create),
-				resourceGroup("", "v1", "configmaps", admissionregv1.Create)),
+				resourceGroup("", "configmaps", admissionregv1.Create),
+				resourceGroup("", "configmaps", admissionregv1.Create)),
 			expected: []string{"/v1/configmaps/CREATE"},
 		},
 	}
@@ -180,8 +180,8 @@ func TestComparePolicies(t *testing.T) {
 func TestSyncWebhookConfigurationCreatesTheRules(t *testing.T) {
 	reconciler, _ := newTestReconciler(t, closedChannel(),
 		policyWith("mutation", 10,
-			resourceGroup("", "v1", "namespaces", admissionregv1.Create),
-			resourceGroup("apps", "v1", "deployments", admissionregv1.OperationAll)),
+			resourceGroup("", "namespaces", admissionregv1.Create),
+			resourceGroup("apps", "deployments", admissionregv1.OperationAll)),
 	)
 
 	if err := reconciler.SyncWebhookConfiguration(context.Background()); err != nil {
@@ -224,7 +224,7 @@ func TestSyncWebhookConfigurationCreatesTheRules(t *testing.T) {
 
 func TestSyncWebhookConfigurationFollowsThePolicies(t *testing.T) {
 	reconciler, _ := newTestReconciler(t, closedChannel(),
-		policyWith("mutation", 0, resourceGroup("", "v1", "namespaces", admissionregv1.Create)),
+		policyWith("mutation", 0, resourceGroup("", "namespaces", admissionregv1.Create)),
 	)
 
 	ctx := context.Background()
@@ -255,7 +255,7 @@ func TestSyncWebhookConfigurationFollowsThePolicies(t *testing.T) {
 
 func TestReconcileKeepsTheStoreUpdatedWhenNotLeader(t *testing.T) {
 	notElected := make(chan struct{})
-	policy := policyWith("mutation", 0, resourceGroup("", "v1", "namespaces", admissionregv1.Create))
+	policy := policyWith("mutation", 0, resourceGroup("", "namespaces", admissionregv1.Create))
 
 	reconciler, registry := newTestReconciler(t, notElected, policy)
 
@@ -272,7 +272,7 @@ func TestReconcileKeepsTheStoreUpdatedWhenNotLeader(t *testing.T) {
 
 func TestReconcileDoesNotWriteTheWebhookWhenNotLeader(t *testing.T) {
 	notElected := make(chan struct{})
-	policy := policyWith("mutation", 0, resourceGroup("", "v1", "namespaces", admissionregv1.Create))
+	policy := policyWith("mutation", 0, resourceGroup("", "namespaces", admissionregv1.Create))
 
 	reconciler, _ := newTestReconciler(t, notElected, policy)
 
@@ -288,7 +288,7 @@ func TestReconcileDoesNotWriteTheWebhookWhenNotLeader(t *testing.T) {
 }
 
 func TestReconcileWritesTheWebhookWhenLeader(t *testing.T) {
-	policy := policyWith("mutation", 0, resourceGroup("", "v1", "namespaces", admissionregv1.Create))
+	policy := policyWith("mutation", 0, resourceGroup("", "namespaces", admissionregv1.Create))
 	reconciler, _ := newTestReconciler(t, closedChannel(), policy)
 
 	if err := reconciler.ReconcileClusterMutationPolicy(context.Background(), watch.Modified, policy); err != nil {
@@ -304,9 +304,9 @@ func TestReconcileWritesTheWebhookWhenLeader(t *testing.T) {
 
 func TestReconcileOrdersTheCollectionByPriorityAndName(t *testing.T) {
 	policies := []*v1alpha1.ClusterMutationPolicy{
-		policyWith("zzz", 10, resourceGroup("", "v1", "namespaces", admissionregv1.Create)),
-		policyWith("aaa", 10, resourceGroup("", "v1", "namespaces", admissionregv1.Create)),
-		policyWith("mmm", 5, resourceGroup("", "v1", "namespaces", admissionregv1.Create)),
+		policyWith("zzz", 10, resourceGroup("", "namespaces", admissionregv1.Create)),
+		policyWith("aaa", 10, resourceGroup("", "namespaces", admissionregv1.Create)),
+		policyWith("mmm", 5, resourceGroup("", "namespaces", admissionregv1.Create)),
 	}
 
 	for _, policy := range policies {
