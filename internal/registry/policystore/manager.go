@@ -17,9 +17,11 @@ limitations under the License.
 package policystore
 
 import (
-	"reflect"
 	"slices"
 	"strings"
+
+	//
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	//
 	"github.com/freepik-company/admitik/internal/pubsub"
@@ -41,29 +43,22 @@ func (ps *PolicyStore[T]) GetReferencedSources() []string {
 	sourceTypes := []string{}
 
 	// Loop over all objects collecting extra resources
-	tmpCollectionNames := ps.Store.GetCollectionNames()
-	for _, tmpCollectionName := range tmpCollectionNames {
-
-		collectionObjectList := ps.Store.GetResources(tmpCollectionName)
-		for _, resourceObj := range collectionObjectList {
-
+	for _, collectionName := range ps.Store.GetCollectionNames() {
+		for _, resourceObj := range ps.Store.GetResources(collectionName) {
 			for _, source := range resourceObj.GetSources() {
 
 				// Prevents potential explosions due to
 				// 'sources' comes empty from time to time
-				if reflect.ValueOf(source).IsZero() {
+				if source.GroupVersionResource == (metav1.GroupVersionResource{}) {
 					continue
 				}
 
-				sourceName := strings.Join([]string{source.Group, source.Version, source.Resource}, "/")
-				sourceTypes = append(sourceTypes, sourceName)
+				sourceTypes = append(sourceTypes, strings.Join([]string{source.Group, source.Version, source.Resource}, "/"))
 			}
 		}
 	}
 
 	// Clean duplicated
 	slices.Sort(sourceTypes)
-	sourceTypes = slices.Compact(sourceTypes)
-
-	return sourceTypes
+	return slices.Compact(sourceTypes)
 }

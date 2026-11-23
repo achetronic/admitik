@@ -17,9 +17,10 @@ limitations under the License.
 package simple
 
 import (
+	"slices"
+
 	//
 	"golang.org/x/exp/maps"
-	"slices"
 )
 
 func NewStore[T StoreResourceI]() *Store[T] {
@@ -28,64 +29,61 @@ func NewStore[T StoreResourceI]() *Store[T] {
 	}
 }
 
-// AddOrUpdateResource add an object to a collection.
-// When the object already exists, updates it
+// AddOrUpdateResource adds an object to a collection.
+// When an object with the same unique identifier already exists, it is replaced.
 func (s *Store[T]) AddOrUpdateResource(collectionName string, object T) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Replace it when found
-	tmpCollection := s.collections[collectionName]
-	for itemIndex, itemObject := range tmpCollection {
+	collection := s.collections[collectionName]
+	for itemIndex, itemObject := range collection {
 		if itemObject.GetUniqueIdentifier() == object.GetUniqueIdentifier() {
-			s.collections[collectionName][itemIndex] = object
+			collection[itemIndex] = object
 			return
 		}
 	}
 
-	// Create it when missing
-	s.collections[collectionName] = append(s.collections[collectionName], object)
+	s.collections[collectionName] = append(collection, object)
 }
 
-// RemoveResource delete an object from a collection
+// RemoveResource deletes an object from a collection.
+// The collection itself is removed when it becomes empty.
 func (s *Store[T]) RemoveResource(collectionName string, object T) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	tmpCollection := s.collections[collectionName]
-	index := -1
-	for itemIndex, itemObject := range tmpCollection {
-		if itemObject.GetUniqueIdentifier() == object.GetUniqueIdentifier() {
-			index = itemIndex
-			break
-		}
-	}
-	if index != -1 {
-		s.collections[collectionName] = append(tmpCollection[:index], tmpCollection[index+1:]...)
+	collection := s.collections[collectionName]
+	index := slices.IndexFunc(collection, func(item T) bool {
+		return item.GetUniqueIdentifier() == object.GetUniqueIdentifier()
+	})
+	if index == -1 {
+		return
 	}
 
-	// Delete the collection when no more objects existing inside it
+	s.collections[collectionName] = slices.Delete(collection, index, index+1)
 	if len(s.collections[collectionName]) == 0 {
 		delete(s.collections, collectionName)
 	}
 }
 
-// GetResources return all the objects of desired collection
+// GetResources returns a snapshot of the desired collection.
+// The returned slice is a copy, so callers can iterate over it while other goroutines
+// keep updating the store.
 func (s *Store[T]) GetResources(collectionName string) []T {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	//
-	if list, listFound := s.collections[collectionName]; listFound {
-		return list
+	collection, found := s.collections[collectionName]
+	if !found {
+		return []T{}
 	}
 
-	return []T{}
+	return slices.Clone(collection)
 }
 
-// GetCollectionNames returns a list of collection names
-// collections are commonly named following pattern: {group}/{version}/{resource}/{operation}
+// GetCollectionNames returns a list of collection names.
+// Collections are commonly named following the pattern: {group}/{version}/{resource}/{operation}
 func (s *Store[T]) GetCollectionNames() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -93,7 +91,8 @@ func (s *Store[T]) GetCollectionNames() []string {
 	return maps.Keys(s.collections)
 }
 
-// SortCollection sorts using a custom comparison function
+// SortCollection sorts a collection once in place. The sort is stable: objects considered
+// equal by 'less' keep their insertion order.
 func (s *Store[T]) SortCollection(
 	collectionName string,
 	less func(a, b T) bool,
@@ -101,20 +100,19 @@ func (s *Store[T]) SortCollection(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	list, found := s.collections[collectionName]
-	if !found || len(list) == 0 {
+	collection, found := s.collections[collectionName]
+	if !found {
 		return
 	}
 
-	slices.SortFunc(list, func(a, b T) int {
-		if less(a, b) {
+	slices.SortStableFunc(collection, func(a, b T) int {
+		switch {
+		case less(a, b):
 			return -1
-		}
-		if less(b, a) {
+		case less(b, a):
 			return 1
+		default:
+			return 0
 		}
-		return 0
 	})
-
-	s.collections[collectionName] = list
 }

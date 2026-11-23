@@ -18,5 +18,7 @@ package simple
 
 // StoreResourceI represents the minimal contract that all the stores must fulfill
 type StoreResourceI interface {
+	// GetUniqueIdentifier returns the identifier used to decide whether an object
+	// being added replaces an existing one
 	GetUniqueIdentifier() string
 }

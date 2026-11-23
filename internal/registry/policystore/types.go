@@ -21,10 +21,11 @@ import (
 	"github.com/freepik-company/admitik/internal/store/simple"
 )
 
+// PolicyStore holds the policies of a single type and exposes the mutations done over them
 type PolicyStore[T PolicyResourceI] struct {
 	// Embed a store to put all the policies
 	// This will be used by third-party controllers to evaluate policies
-	Store *simple.Store[T]
+	*simple.Store[T]
 
 	// Embed a broadcaster to send events related to the policies.
 	// This will be used by third-party controllers to trigger special actions

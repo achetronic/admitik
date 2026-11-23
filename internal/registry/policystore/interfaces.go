@@ -26,6 +26,13 @@ import (
 type PolicyResourceI interface {
 	simple.StoreResourceI
 
-	//
+	// GetSources returns the extra resources this policy needs in its templates
 	GetSources() []v1alpha1.SourceGroupT
+}
+
+// SourceProvider represents a policy store able to report the sources referenced
+// by the policies it holds. Consumers that only need those sources, such as the
+// SourcesController, depend on this interface instead of a concrete policy type
+type SourceProvider interface {
+	GetReferencedSources() []string
 }

@@ -20,6 +20,7 @@ import (
 	"sync"
 )
 
+// Store keeps objects of a single type grouped in named collections.
 type Store[T StoreResourceI] struct {
 	mu sync.RWMutex
 
