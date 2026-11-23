@@ -18,6 +18,8 @@ package template
 
 // InjectedData is the context handed to the template engines.
 // It is the same for every engine: what changes is how each one reads it.
+// An instance belongs to a single evaluation: engines write into Vars, so it must not be
+// shared between goroutines.
 type InjectedData struct {
 	// Operation is the normalized event type: CREATE, UPDATE or DELETE
 	Operation string
