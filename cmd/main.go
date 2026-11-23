@@ -17,8 +17,10 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -397,7 +399,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&clustermutationpolicy.ClusterMutationPolicyReconciler{
+	mutationPolicyReconciler := &clustermutationpolicy.ClusterMutationPolicyReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 
@@ -409,16 +411,18 @@ func main() {
 
 			WebhookClientConfig: webhookClientConfigMutation,
 			WebhookTimeout:      webhooksClientTimeout,
+			Elected:             mgr.Elected(),
 		},
 		Dependencies: clustermutationpolicy.ClusterMutationPolicyControllerDependencies{
 			ClusterMutationPolicyRegistry: clusterMutationPolicyReg,
 		},
-	}).SetupWithManager(mgr); err != nil {
+	}
+	if err = mutationPolicyReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ClusterMutationPolicy")
 		os.Exit(1)
 	}
 
-	if err = (&clustervalidationpolicy.ClusterValidationPolicyReconciler{
+	validationPolicyReconciler := &clustervalidationpolicy.ClusterValidationPolicyReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 
@@ -430,12 +434,30 @@ func main() {
 
 			WebhookClientConfig: webhookClientConfigValidation,
 			WebhookTimeout:      webhooksClientTimeout,
+			Elected:             mgr.Elected(),
 		},
 		Dependencies: clustervalidationpolicy.ClusterValidationPolicyControllerDependencies{
 			ClusterValidationPolicyRegistry: clusterValidationPolicyReg,
 		},
-	}).SetupWithManager(mgr); err != nil {
+	}
+	if err = validationPolicyReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ClusterValidationPolicy")
+		os.Exit(1)
+	}
+
+	// The webhook configurations are only written by the leader, so a replica that takes over has
+	// to write them with the policies this replica already knows about
+	if err = mgr.Add(controller.ElectionRefresh{
+		Name: "webhook-configurations",
+		Refresh: func(ctx context.Context) error {
+			if err := mutationPolicyReconciler.SyncWebhookConfiguration(ctx); err != nil {
+				return err
+			}
+
+			return validationPolicyReconciler.SyncWebhookConfiguration(ctx)
+		},
+	}); err != nil {
+		setupLog.Error(err, "failed adding the webhook refresh to the manager")
 		os.Exit(1)
 	}
 
@@ -520,7 +542,11 @@ func main() {
 		setupLog.Error(err, "unable to set up health check")
 		os.Exit(1)
 	}
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+	// A replica that has not synced its caches would evaluate the policies with empty sources,
+	// so it must not receive admission requests yet
+	if err := mgr.AddReadyzCheck("readyz", func(_ *http.Request) error {
+		return sourcesController.Ready()
+	}); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}

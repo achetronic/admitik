@@ -46,6 +46,25 @@ type ClusterMutationPolicyControllerOptions struct {
 
 	WebhookClientConfig admissionregv1.WebhookClientConfig
 	WebhookTimeout      int
+
+	// Elected is closed when this replica becomes the leader. Only the leader writes the
+	// webhook configuration, so several replicas do not fight over the same object
+	Elected <-chan struct{}
+}
+
+// IsLeader reports whether this replica is allowed to write the webhook configuration
+func (r *ClusterMutationPolicyReconciler) IsLeader() bool {
+
+	if r.Options.Elected == nil {
+		return true
+	}
+
+	select {
+	case <-r.Options.Elected:
+		return true
+	default:
+		return false
+	}
 }
 
 type ClusterMutationPolicyControllerDependencies struct {

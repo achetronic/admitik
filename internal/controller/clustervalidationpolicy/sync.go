@@ -22,8 +22,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/freepik-company/admitik/internal/pubsub"
-
 	//
 	admissionregv1 "k8s.io/api/admissionregistration/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -35,6 +33,7 @@ import (
 	//
 	"github.com/freepik-company/admitik/api/v1alpha1"
 	"github.com/freepik-company/admitik/internal/controller"
+	"github.com/freepik-company/admitik/internal/pubsub"
 )
 
 const (
@@ -62,7 +61,9 @@ var (
 )
 
 // ReconcileClusterValidationPolicy keeps internal ClusterValidationPolicy resources' registry up-to-date
-func (r *ClusterValidationPolicyReconciler) ReconcileClusterValidationPolicy(ctx context.Context, eventType watch.EventType, resourceManifest *v1alpha1.ClusterValidationPolicy) (err error) {
+func (r *ClusterValidationPolicyReconciler) ReconcileClusterValidationPolicy(
+	ctx context.Context, eventType watch.EventType, resourceManifest *v1alpha1.ClusterValidationPolicy) (err error) {
+
 	logger := log.FromContext(ctx)
 
 	// Publish the event in the registry event bus
@@ -71,24 +72,57 @@ func (r *ClusterValidationPolicyReconciler) ReconcileClusterValidationPolicy(ctx
 		Object: resourceManifest,
 	})
 
-	// Update the registry store
-	var desiredWatchedTypes []string
-	for _, intercResourceGroup := range resourceManifest.Spec.InterceptedResources {
+	watched := WatchedTypes(resourceManifest)
 
-		// Replace wildcards in operations
-		if slices.Contains(intercResourceGroup.Operations, admissionregv1.OperationAll) {
-			intercResourceGroup.Operations = AdmissionOperations
+	// Update the registry store
+	if eventType == watch.Deleted {
+		for _, watchedType := range watched {
+			logger.Info(resourceDeletionMessage, "watcher", watchedType)
+			r.Dependencies.ClusterValidationPolicyRegistry.Store.RemoveResource(watchedType, resourceManifest)
+		}
+	} else {
+		for _, watchedType := range watched {
+			logger.Info(resourceUpdatedMessage, "watcher", watchedType)
+			r.Dependencies.ClusterValidationPolicyRegistry.Store.AddOrUpdateResource(watchedType, resourceManifest)
+		}
+	}
+
+	// Clean non-desired watched types. This is needed for updates where the user
+	// reduces the amount of watched operations on watched resources
+	for _, registeredResourceType := range r.Dependencies.ClusterValidationPolicyRegistry.Store.GetCollectionNames() {
+		if !slices.Contains(watched, registeredResourceType) {
+			r.Dependencies.ClusterValidationPolicyRegistry.Store.RemoveResource(registeredResourceType, resourceManifest)
+		}
+	}
+
+	// Only the leader writes the webhook configuration. The rest of the replicas keep the store
+	// updated, which is what the admission server of each replica needs
+	if !r.IsLeader() {
+		return nil
+	}
+
+	return r.SyncWebhookConfiguration(ctx)
+}
+
+// WatchedTypes returns the collection keys the policy applies to, expressed as
+// {group}/{version}/{resource}/{operation}
+func WatchedTypes(policy *v1alpha1.ClusterValidationPolicy) []string {
+
+	watched := []string{}
+
+	for _, intercResourceGroup := range policy.Spec.InterceptedResources {
+
+		operations := intercResourceGroup.Operations
+		if slices.Contains(operations, admissionregv1.OperationAll) {
+			operations = AdmissionOperations
 		}
 
-		//
-		for _, operation := range intercResourceGroup.Operations {
+		for _, operation := range operations {
 
-			// Skip unsupported operations
 			if !slices.Contains(AdmissionOperations, operation) {
 				continue
 			}
 
-			//
 			watchedType := strings.Join([]string{
 				intercResourceGroup.Group,
 				intercResourceGroup.Version,
@@ -96,110 +130,62 @@ func (r *ClusterValidationPolicyReconciler) ReconcileClusterValidationPolicy(ctx
 				string(operation),
 			}, "/")
 
-			// Handle deletion requests
-			if eventType == watch.Deleted {
-				logger.Info(resourceDeletionMessage, "watcher", watchedType)
-				r.Dependencies.ClusterValidationPolicyRegistry.Store.RemoveResource(watchedType, resourceManifest)
+			if slices.Contains(watched, watchedType) {
 				continue
 			}
 
-			// Handle creation/update requests
-			if eventType == watch.Modified {
-				logger.Info(resourceUpdatedMessage, "watcher", watchedType)
-
-				// Avoid adding those already added.
-				// This prevents user from defining the group more than once per manifest
-				if slices.Contains(desiredWatchedTypes, watchedType) {
-					continue
-				}
-				desiredWatchedTypes = append(desiredWatchedTypes, watchedType)
-				r.Dependencies.ClusterValidationPolicyRegistry.Store.AddOrUpdateResource(watchedType, resourceManifest)
-			}
+			watched = append(watched, watchedType)
 		}
 	}
 
-	// Clean non-desired watched types. This is needed for updates where the user
-	// reduces the amount of watched operations on watched resources
-	for _, registeredResourceType := range r.Dependencies.ClusterValidationPolicyRegistry.Store.GetCollectionNames() {
-		if !slices.Contains(desiredWatchedTypes, registeredResourceType) {
-			r.Dependencies.ClusterValidationPolicyRegistry.Store.RemoveResource(registeredResourceType, resourceManifest)
-		}
-	}
+	return watched
+}
 
-	// Craft ValidatingWebhookConfiguration rules based on the previous existing one and current pool keys
-	metaWebhookObj, alreadyCreated, err := r.getMergedValidatingWebhookConfiguration(ctx)
+// SyncWebhookConfiguration builds the webhook configuration from the policies in the cluster and
+// applies it. It must only be called by the leader
+func (r *ClusterValidationPolicyReconciler) SyncWebhookConfiguration(ctx context.Context) error {
+
+	metaWebhookObj, alreadyCreated, err := r.buildWebhookConfiguration(ctx)
 	if err != nil {
-		err = fmt.Errorf("error building ValidatingWebhookConfiguration '%s': %s",
-			ValidatingWebhookConfigurationName, err.Error())
-		return
+		return fmt.Errorf("error building ValidatingWebhookConfiguration '%s': %w", ValidatingWebhookConfigurationName, err)
 	}
 
 	// Sync changes to Kubernetes
 	if !alreadyCreated {
-		err = r.Create(ctx, &metaWebhookObj)
-		if err != nil {
-			err = fmt.Errorf("error creating ValidatingWebhookConfiguration in Kubernetes'%s': %s",
-				ValidatingWebhookConfigurationName, err.Error())
-			return
+		if err = r.Create(ctx, &metaWebhookObj); err != nil {
+			return fmt.Errorf("error creating ValidatingWebhookConfiguration in Kubernetes '%s': %w",
+				ValidatingWebhookConfigurationName, err)
 		}
-	} else {
-		err = r.Update(ctx, &metaWebhookObj)
-		if err != nil {
-			err = fmt.Errorf("error updating ValidatingWebhookConfiguration in Kubernetes '%s': %s",
-				ValidatingWebhookConfigurationName, err.Error())
-			return
-		}
+
+		return nil
+	}
+
+	if err = r.Update(ctx, &metaWebhookObj); err != nil {
+		return fmt.Errorf("error updating ValidatingWebhookConfiguration in Kubernetes '%s': %w",
+			ValidatingWebhookConfigurationName, err)
 	}
 
 	return nil
 }
 
-// getValidatingWebhookConfiguration return a ValidatingWebhookConfiguration object that is built based on
-// previous existing one in Kubernetes and the current pool keys extracted from ClusterValidationPolicy.spec.InterceptedResources
-func (r *ClusterValidationPolicyReconciler) getMergedValidatingWebhookConfiguration(ctx context.Context) (
-	vwConfig admissionregv1.ValidatingWebhookConfiguration, alreadyCreated bool, err error) {
+// buildWebhookConfiguration returns the ValidatingWebhookConfiguration the cluster should have,
+// built from the policies that exist right now
+func (r *ClusterValidationPolicyReconciler) buildWebhookConfiguration(ctx context.Context) (
+	admissionregv1.ValidatingWebhookConfiguration, bool, error) {
 
-	// Craft ValidatingWebhookConfiguration rules based on the pool keys
-	currentVwcRules := []admissionregv1.RuleWithOperations{}
-	InterceptedResourcesPatterns := r.Dependencies.ClusterValidationPolicyRegistry.Store.GetCollectionNames()
-
-	for _, resourcePattern := range InterceptedResourcesPatterns {
-
-		resourcePatternParts := strings.Split(resourcePattern, "/")
-		if len(resourcePatternParts) != 4 {
-			err = fmt.Errorf("some key-pattern is invalid on ClusterValidationPolicy registry. Open an issue to fix it")
-			return
-		}
-
-		tmpRule := admissionregv1.RuleWithOperations{
-			Rule: admissionregv1.Rule{
-				APIGroups:   []string{resourcePatternParts[0]},
-				APIVersions: []string{resourcePatternParts[1]},
-				Resources:   []string{resourcePatternParts[2]},
-				Scope:       &ValidatingWebhookConfigurationRuleScopeAll,
-			},
-			Operations: []admissionregv1.OperationType{admissionregv1.OperationType(resourcePatternParts[3])},
-		}
-		currentVwcRules = append(currentVwcRules, tmpRule)
-	}
-
-	// Obtain potential existing ValidatingWebhookConfiguration
 	metaWebhookObj := admissionregv1.ValidatingWebhookConfiguration{}
 	metaWebhookObj.Name = ValidatingWebhookConfigurationName
 
-	err = r.Get(ctx, types.NamespacedName{
-		Name: ValidatingWebhookConfigurationName,
-	}, &metaWebhookObj)
-	if err != nil {
-		if !errors.IsNotFound(err) {
-			err = fmt.Errorf("error getting the ValidatingWebhookConfiguration '%s' : %s",
-				ValidatingWebhookConfigurationName, err.Error())
-			return
-		}
+	err := r.Get(ctx, types.NamespacedName{Name: ValidatingWebhookConfigurationName}, &metaWebhookObj)
+	alreadyCreated := err == nil
+	if err != nil && !errors.IsNotFound(err) {
+		return metaWebhookObj, false, fmt.Errorf("error getting the ValidatingWebhookConfiguration '%s': %w",
+			ValidatingWebhookConfigurationName, err)
 	}
 
-	if !strings.EqualFold(string(metaWebhookObj.UID), "") {
-		alreadyCreated = true
+	rules, err := r.webhookRules(ctx)
+	if err != nil {
+		return metaWebhookObj, alreadyCreated, err
 	}
 
 	// Create a bare new 'webhooks' section for the ValidatingWebhookConfiguration and fill it
@@ -209,7 +195,7 @@ func (r *ClusterValidationPolicyReconciler) getMergedValidatingWebhookConfigurat
 	tmpWebhookObj.Name = "validate.admitik.svc"
 	tmpWebhookObj.AdmissionReviewVersions = []string{"v1"}
 	tmpWebhookObj.ClientConfig = r.Options.WebhookClientConfig
-	tmpWebhookObj.Rules = currentVwcRules
+	tmpWebhookObj.Rules = rules
 	tmpWebhookObj.TimeoutSeconds = &timeoutSecondsConverted
 
 	// Ignore sensitive namespaces to avoid breaking Kubernetes essential services or chicken-egg scenarios
@@ -246,4 +232,46 @@ func (r *ClusterValidationPolicyReconciler) getMergedValidatingWebhookConfigurat
 	metaWebhookObj.Webhooks = []admissionregv1.ValidatingWebhook{tmpWebhookObj}
 
 	return metaWebhookObj, alreadyCreated, nil
+}
+
+// webhookRules returns one rule per watched type, taken from the policies in the cluster.
+// They are sorted so the same set of policies always produces the same object
+func (r *ClusterValidationPolicyReconciler) webhookRules(ctx context.Context) ([]admissionregv1.RuleWithOperations, error) {
+
+	policies := &v1alpha1.ClusterValidationPolicyList{}
+	if err := r.List(ctx, policies); err != nil {
+		return nil, fmt.Errorf("error listing the ClusterValidationPolicy resources: %w", err)
+	}
+
+	patterns := []string{}
+	for index := range policies.Items {
+		for _, watchedType := range WatchedTypes(&policies.Items[index]) {
+			if !slices.Contains(patterns, watchedType) {
+				patterns = append(patterns, watchedType)
+			}
+		}
+	}
+
+	slices.Sort(patterns)
+
+	rules := make([]admissionregv1.RuleWithOperations, 0, len(patterns))
+	for _, resourcePattern := range patterns {
+
+		resourcePatternParts := strings.Split(resourcePattern, "/")
+		if len(resourcePatternParts) != 4 {
+			return nil, fmt.Errorf("some key-pattern is invalid on ClusterValidationPolicy registry: %s", resourcePattern)
+		}
+
+		rules = append(rules, admissionregv1.RuleWithOperations{
+			Rule: admissionregv1.Rule{
+				APIGroups:   []string{resourcePatternParts[0]},
+				APIVersions: []string{resourcePatternParts[1]},
+				Resources:   []string{resourcePatternParts[2]},
+				Scope:       &ValidatingWebhookConfigurationRuleScopeAll,
+			},
+			Operations: []admissionregv1.OperationType{admissionregv1.OperationType(resourcePatternParts[3])},
+		})
+	}
+
+	return rules, nil
 }
