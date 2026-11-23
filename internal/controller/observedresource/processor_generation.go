@@ -32,15 +32,15 @@ import (
 	//
 	"github.com/freepik-company/admitik/api/v1alpha1"
 	"github.com/freepik-company/admitik/internal/common"
+	"github.com/freepik-company/admitik/internal/evaluator"
 	"github.com/freepik-company/admitik/internal/globals"
-	"github.com/freepik-company/admitik/internal/informer"
 	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
 	"github.com/freepik-company/admitik/internal/template"
 )
 
 type GenerationProcessorDependencies struct {
 	ClusterGenerationPolicyRegistry *policyStore.PolicyStore[*v1alpha1.ClusterGenerationPolicy]
-	Pool                            *informer.Pool
+	Evaluator                       *evaluator.Evaluator
 	Engines                         *template.Registry
 
 	//
@@ -81,22 +81,18 @@ func (p *GenerationProcessor) Process(resourceType string, eventType watch.Event
 		logger = logger.WithValues("ClusterGenerationPolicy", policyObj.Name)
 
 		// Retrieve the sources declared per policy
-		tmpFetchedPolicySources, fetchErr := common.FetchPolicySources(p.dependencies.Engines, p.dependencies.Pool, policyObj, commonTemplateInjectedObject)
-		if fetchErr != nil {
-			logger.Info("failed fetching sources. Broken ones will be empty", "error", fetchErr.Error())
-		}
-
 		specificTemplateInjectedObject := *commonTemplateInjectedObject
-		specificTemplateInjectedObject.Sources = tmpFetchedPolicySources
+		prepared := p.dependencies.Evaluator.Prepare(evaluator.Request{
+			Policy:     policyObj,
+			Conditions: policyObj.Spec.Conditions,
+		}, &specificTemplateInjectedObject)
 
-		//Evaluate template conditions
-		conditionsPassed, condErr := common.IsPassingConditions(p.dependencies.Engines, policyObj.Spec.Conditions, &specificTemplateInjectedObject)
-		if condErr != nil {
-			logger.Info(fmt.Sprintf("failed evaluating conditions: %s", condErr.Error()))
+		if prepared.Err != nil {
+			logger.Info("policy could not be prepared", "reason", prepared.Reason, "error", prepared.Err.Error())
 		}
 
 		// Conditions are not met, skip generating the resource
-		if !conditionsPassed {
+		if !prepared.Passed {
 			continue
 		}
 

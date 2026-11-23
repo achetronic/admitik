@@ -33,6 +33,7 @@ import (
 
 	//
 	"github.com/freepik-company/admitik/api/v1alpha1"
+	"github.com/freepik-company/admitik/internal/evaluator"
 	"github.com/freepik-company/admitik/internal/informer"
 	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
 	"github.com/freepik-company/admitik/internal/template"
@@ -82,8 +83,8 @@ func testServer(t *testing.T, mutation []*v1alpha1.ClusterMutationPolicy, valida
 			ClusterMutationPolicyRegistry:   mutationStore,
 			ClusterValidationPolicyRegistry: validationStore,
 			// The policies used by these tests declare no sources, so the pool is never asked
-			Pool:    informer.NewPool(&ctx, nil, 0),
-			Engines: testEngines(t),
+			Evaluator: evaluator.New(testEngines(t), informer.NewPool(&ctx, nil, 0)),
+			Engines:   testEngines(t),
 		},
 	}
 }

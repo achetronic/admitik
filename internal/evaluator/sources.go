@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package common
+package evaluator
 
 import (
 	"errors"
@@ -50,7 +50,7 @@ func versionOf(parts []string) string {
 }
 
 // FetchPolicySources TODO
-func FetchPolicySources[T policystore.PolicyResourceI](
+func fetchSources[T policystore.PolicyResourceI](
 	engines *template.Registry,
 	pool *informer.Pool,
 	policy T,
@@ -79,22 +79,25 @@ func FetchPolicySources[T policystore.PolicyResourceI](
 
 		// Resolve CEL expressions in filters
 		if localErr := resolveInlineCelExpressionsRecursive(engines, reflect.ValueOf(sourceItemCopy.Filters), injectedData); localErr != nil {
-			tmpErrors = append(tmpErrors, fmt.Errorf("failed to resolve CEL in filters for GVR '%v': %v", GvrString(gvr), localErr))
+			tmpErrors = append(tmpErrors, fmt.Errorf("failed to resolve CEL in filters for GVR '%v': %v", resourceID(gvr), localErr))
 			results[sourceIndex] = []map[string]any{}
 			continue
 		}
 
 		versionParts = append(versionParts, fmt.Sprintf("%d:%s@%d:%v",
-			sourceIndex, GvrString(gvr), snapshot.Version, sourceItemCopy.Filters))
+			sourceIndex, resourceID(gvr), snapshot.Version, sourceItemCopy.Filters))
 
 		// Filter resources
 		filtered, localErr := filterResources(snapshot.Objects, sourceItemCopy.Filters)
 		if localErr != nil {
-			tmpErrors = append(tmpErrors, fmt.Errorf("failed to filter resources for GVR '%v': %v", GvrString(gvr), localErr))
+			tmpErrors = append(tmpErrors, fmt.Errorf("failed to filter resources for GVR '%v': %v", resourceID(gvr), localErr))
 			results[sourceIndex] = []map[string]any{}
 			continue
 		}
 
+		// El índice existe aunque no haya objetos, para que 'sources[0]' sea una lista vacía
+		// y no una clave que falta
+		results[sourceIndex] = make([]map[string]any, 0, len(filtered))
 		for _, resource := range filtered {
 			results[sourceIndex] = append(results[sourceIndex], *resource)
 		}

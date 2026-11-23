@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package common
+package evaluator
 
 import (
 	"fmt"
@@ -25,7 +25,7 @@ import (
 )
 
 // IsPassingConditions iterate over a list of templated conditions and return whether they are passing or not
-func IsPassingConditions(
+func passingConditions(
 	engines *template.Registry,
 	conditionList []v1alpha1.ConditionT,
 	injectedData *template.InjectedData,

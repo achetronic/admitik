@@ -33,6 +33,7 @@ import (
 
 	//
 	"github.com/freepik-company/admitik/api/v1alpha1"
+	"github.com/freepik-company/admitik/internal/evaluator"
 	"github.com/freepik-company/admitik/internal/informer"
 	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
 	resourceObserverRegistry "github.com/freepik-company/admitik/internal/registry/resourceobserver"
@@ -76,6 +77,9 @@ type ObservedResourceControllerDependencies struct {
 
 	// Engines renders the conditions and the generated objects
 	Engines *template.Registry
+
+	// Evaluator prepares the context of the policies and checks their conditions
+	Evaluator *evaluator.Evaluator
 }
 
 // ObservedResourceController represents the controller that triggers parallel threads.
@@ -130,9 +134,9 @@ func (r *ObservedResourceController) Start(ctx context.Context) error {
 	// Create an event dispatcher for later usage
 	r.dispatcher = NewEventDispatcher(EventDispatcherDependencies{
 		ClusterGenerationPolicyRegistry: r.Dependencies.ClusterGenerationPolicyRegistry,
-		Pool:                            r.Dependencies.Pool,
 		ResourceObserverRegistry:        r.Dependencies.ResourceObserverRegistry,
 		Engines:                         r.Dependencies.Engines,
+		Evaluator:                       r.Dependencies.Evaluator,
 	})
 
 	ticker := time.NewTicker(secondsToReconcileInformersAgain)

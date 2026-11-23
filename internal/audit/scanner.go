@@ -34,8 +34,8 @@ import (
 
 	//
 	"github.com/freepik-company/admitik/api/v1alpha1"
-	"github.com/freepik-company/admitik/internal/common"
-	"github.com/freepik-company/admitik/internal/informer"
+	"github.com/freepik-company/admitik/internal/evaluator"
+	"github.com/freepik-company/admitik/internal/telemetry"
 	"github.com/freepik-company/admitik/internal/template"
 )
 
@@ -66,12 +66,9 @@ type ScannerDependencies struct {
 	// Dynamic lists the objects to evaluate
 	Dynamic dynamic.Interface
 
-	// Engines renders the conditions of the policies
-	Engines *template.Registry
-
-	// Pool holds the sources of the policies. They are only available for the sources that some
-	// policy is already watching
-	Pool *informer.Pool
+	// Evaluator prepares the context of the policies and checks their conditions.
+	// The sources are only there for the ones some policy is already watching
+	Evaluator *evaluator.Evaluator
 }
 
 // Scanner evaluates the validation policies over the objects that already exist in the cluster
@@ -164,21 +161,23 @@ func (s *Scanner) scanResource(
 		data.Object = object
 
 		// The sources are only there when another policy is already watching them
-		sources, fetchErr := common.FetchPolicySources(s.dependencies.Engines, s.dependencies.Pool, policy, data)
-		if fetchErr != nil {
-			logger.Info("failed fetching sources for the audit", "policy", policy.Name, "error", fetchErr.Error())
-		}
-		data.Sources = sources
+		prepared := s.dependencies.Evaluator.Prepare(evaluator.Request{
+			Policy:     policy,
+			Conditions: policy.Spec.Conditions,
+		}, data)
 
-		passed, err := common.IsPassingConditions(s.dependencies.Engines, policy.Spec.Conditions, data)
-		if err != nil {
+		if prepared.Reason == telemetry.ReasonConditions {
 			result.Errors++
 			logger.Info("failed evaluating conditions during the audit",
-				"policy", policy.Name, "object", objectName(object), "error", err.Error())
+				"policy", policy.Name, "object", objectName(object), "error", prepared.Err.Error())
 			continue
 		}
+		if prepared.Err != nil {
+			logger.Info("failed fetching sources for the audit",
+				"policy", policy.Name, "object", objectName(object), "error", prepared.Err.Error())
+		}
 
-		if passed {
+		if prepared.Passed {
 			result.Compliant++
 			continue
 		}

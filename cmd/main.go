@@ -53,6 +53,7 @@ import (
 	"github.com/freepik-company/admitik/internal/controller/clustervalidationpolicy"
 	"github.com/freepik-company/admitik/internal/controller/observedresource"
 	"github.com/freepik-company/admitik/internal/controller/sources"
+	"github.com/freepik-company/admitik/internal/evaluator"
 	"github.com/freepik-company/admitik/internal/globals"
 	"github.com/freepik-company/admitik/internal/informer"
 	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
@@ -392,6 +393,9 @@ func main() {
 		globals.Application.KubeRawClient,
 		sourcesTimeToResyncInformers)
 
+	// Evaluator used by every policy type to prepare its context and check its conditions
+	policyEvaluator := evaluator.New(engines, informersPool)
+
 	// Init internal registries controllers
 	// Following controllers manage internal registries for user-facing resources.
 	// IMPORTANT: All the replicas are able to process and leader is not chosen for this.
@@ -488,6 +492,7 @@ func main() {
 			Pool:                            informersPool,
 			ResourceObserverRegistry:        resourceObserverReg,
 			Engines:                         engines,
+			Evaluator:                       policyEvaluator,
 		},
 	}
 	if err = mgr.Add(&observedResourceController); err != nil {
@@ -539,7 +544,7 @@ func main() {
 			Context:                         &globals.Application.Context,
 			ClusterValidationPolicyRegistry: clusterValidationPolicyReg,
 			ClusterMutationPolicyRegistry:   clusterMutationPolicyReg,
-			Pool:                            informersPool,
+			Evaluator:                       policyEvaluator,
 			Engines:                         engines,
 			Metrics:                         telemetryRecorder,
 		})
@@ -552,10 +557,9 @@ func main() {
 	// and write one aggregated report. Disabled when the interval is zero
 	if auditInterval > 0 {
 		auditScanner := audit.NewScanner(audit.ScannerOptions{}, audit.ScannerDependencies{
-			Client:  mgr.GetClient(),
-			Dynamic: globals.Application.KubeRawClient,
-			Engines: engines,
-			Pool:    informersPool,
+			Client:    mgr.GetClient(),
+			Dynamic:   globals.Application.KubeRawClient,
+			Evaluator: policyEvaluator,
 		})
 
 		if err = mgr.Add(audit.Runner{Interval: auditInterval, Scanner: auditScanner}); err != nil {

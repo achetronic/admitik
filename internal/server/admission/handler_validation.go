@@ -31,7 +31,7 @@ import (
 
 	//
 	"github.com/freepik-company/admitik/api/v1alpha1"
-	"github.com/freepik-company/admitik/internal/common"
+	"github.com/freepik-company/admitik/internal/evaluator"
 	"github.com/freepik-company/admitik/internal/telemetry"
 	"github.com/freepik-company/admitik/internal/template"
 )
@@ -123,25 +123,19 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 		policyLogger := logger.WithValues("ClusterValidationPolicy", caPolicyObj.Name)
 		started := time.Now()
 
-		// Retrieve the sources declared per policy
-		fetchedSources, fetchErr := common.FetchPolicySources(s.dependencies.Engines, s.dependencies.Pool, caPolicyObj, commonTemplateInjectedObject)
-		if fetchErr != nil {
-			policyLogger.Info("failed fetching sources. Broken ones will be empty", "error", fetchErr.Error())
-		}
-
 		specificTemplateInjectedObject := *commonTemplateInjectedObject
-		specificTemplateInjectedObject.Sources = fetchedSources
+		prepared := s.dependencies.Evaluator.Prepare(evaluator.Request{
+			Policy:     caPolicyObj,
+			Conditions: caPolicyObj.Spec.Conditions,
+		}, &specificTemplateInjectedObject)
 
-		result := s.validateWith(caPolicyObj, &specificTemplateInjectedObject)
-		if fetchErr != nil {
-			result.Warning = fmt.Sprintf(
-				"admitik: policy '%s' could not read its sources, so it was evaluated with the objects available",
-				caPolicyObj.Name)
-			result.Reason = telemetry.ReasonSources
+		result := s.validateWith(caPolicyObj, &specificTemplateInjectedObject, prepared)
+		if result.Err != nil {
+			policyLogger.Info("policy could not be applied", "reason", result.Reason, "error", result.Err.Error())
 		}
 
 		s.dependencies.Metrics.Evaluation(telemetry.KindValidate, caPolicyObj.Name,
-			time.Since(started), countSourceObjects(fetchedSources))
+			time.Since(started), countSourceObjects(specificTemplateInjectedObject.Sources))
 		s.dependencies.Metrics.Decision(telemetry.Decision{
 			Kind:      telemetry.KindValidate,
 			Policy:    caPolicyObj.Name,
@@ -193,47 +187,63 @@ type validationResult struct {
 	Outcome telemetry.Outcome
 	Reason  telemetry.Reason
 
+	// Err is what went wrong, for the logs
+	Err error
+
 	// Warning is a message for the user, empty when there is nothing to say
 	Warning string
 }
 
-// validateWith evaluates the conditions and the message of one policy over the object
+// validateWith evaluates the conditions of one policy over the object and, when it rejects it,
+// renders the message shown to the user
 func (s *HttpServer) validateWith(
 	policy *v1alpha1.ClusterValidationPolicy,
 	data *template.InjectedData,
+	prepared evaluator.Result,
 ) validationResult {
 
 	permissive := strings.ToLower(policy.Spec.FailureAction) == v1alpha1.ValidationFailureActionPermissive
 
-	conditionsPassed, condErr := common.IsPassingConditions(s.dependencies.Engines, policy.Spec.Conditions, data)
-
-	result := validationResult{}
-	if condErr != nil {
-		result.Warning = fmt.Sprintf("admitik: policy '%s' could not evaluate its conditions", policy.Name)
-		result.Reason = telemetry.ReasonConditions
+	// A broken source does not stop the policy, but the user has to know
+	warning := ""
+	if prepared.Reason == telemetry.ReasonSources {
+		warning = fmt.Sprintf(
+			"admitik: policy '%s' could not read its sources, so it was evaluated with the objects available",
+			policy.Name)
 	}
 
-	if conditionsPassed {
-		result.Outcome = telemetry.OutcomeAllowed
-		return result
+	if prepared.Passed {
+		return validationResult{
+			Outcome: telemetry.OutcomeAllowed,
+			Reason:  prepared.Reason,
+			Err:     prepared.Err,
+			Warning: warning,
+		}
 	}
 
 	// A policy that cannot be evaluated rejects the object, unless it is in permissive mode
-	result.Denied = true
-	result.Permissive = permissive
-	result.Outcome = telemetry.OutcomeDenied
+	result := validationResult{
+		Denied:     true,
+		Permissive: permissive,
+		Outcome:    telemetry.OutcomeDenied,
+		Reason:     prepared.Reason,
+		Err:        prepared.Err,
+		Warning:    warning,
+	}
 	if permissive {
 		result.Outcome = telemetry.OutcomePermissive
 	}
-	if condErr != nil {
+	if prepared.Reason == telemetry.ReasonConditions {
 		result.Outcome = telemetry.OutcomeFailed
+		result.Warning = fmt.Sprintf("admitik: policy '%s' could not evaluate its conditions", policy.Name)
 	}
 
 	message, err := s.dependencies.Engines.Evaluate(policy.Spec.Message.Engine, policy.Spec.Message.Template, data)
 	if err != nil {
 		result.Message = "Reason unavailable: message template failed. More info in controller logs."
-		result.Warning = fmt.Sprintf("admitik: policy '%s' could not render its message", policy.Name)
+		result.Err = err
 		result.Reason = telemetry.ReasonTemplate
+		result.Warning = fmt.Sprintf("admitik: policy '%s' could not render its message", policy.Name)
 		return result
 	}
 

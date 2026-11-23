@@ -37,7 +37,7 @@ import (
 
 	//
 	"github.com/freepik-company/admitik/api/v1alpha1"
-	"github.com/freepik-company/admitik/internal/common"
+	"github.com/freepik-company/admitik/internal/evaluator"
 	"github.com/freepik-company/admitik/internal/globals"
 	"github.com/freepik-company/admitik/internal/telemetry"
 	"github.com/freepik-company/admitik/internal/template"
@@ -133,26 +133,19 @@ func (s *HttpServer) handleMutationRequest(response http.ResponseWriter, request
 		policyLogger := logger.WithValues("ClusterMutationPolicy", cmPolicyObj.Name)
 		started := time.Now()
 
-		// Retrieve the sources declared per policy
-		fetchedSources, fetchErr := common.FetchPolicySources(s.dependencies.Engines, s.dependencies.Pool, cmPolicyObj, commonTemplateInjectedObject)
-		if fetchErr != nil {
-			policyLogger.Info("failed fetching sources. Broken ones will be empty", "error", fetchErr.Error())
-		}
-
 		specificTemplateInjectedObject := *commonTemplateInjectedObject
-		specificTemplateInjectedObject.Sources = fetchedSources
+		prepared := s.dependencies.Evaluator.Prepare(evaluator.Request{
+			Policy:     cmPolicyObj,
+			Conditions: cmPolicyObj.Spec.Conditions,
+		}, &specificTemplateInjectedObject)
 
-		result := s.mutateWith(cmPolicyObj, &specificTemplateInjectedObject, patchedObjectBytes)
-		if fetchErr != nil {
-			result.Outcome = telemetry.OutcomeFailed
-			result.Reason = telemetry.ReasonSources
-			result.Warning = fmt.Sprintf(
-				"admitik: policy '%s' could not read its sources, so it was applied with the objects available",
-				cmPolicyObj.Name)
+		result := s.mutateWith(cmPolicyObj, &specificTemplateInjectedObject, patchedObjectBytes, prepared)
+		if result.Err != nil {
+			policyLogger.Info("policy could not be applied", "reason", result.Reason, "error", result.Err.Error())
 		}
 
 		s.dependencies.Metrics.Evaluation(telemetry.KindMutate, cmPolicyObj.Name,
-			time.Since(started), countSourceObjects(fetchedSources))
+			time.Since(started), countSourceObjects(specificTemplateInjectedObject.Sources))
 		s.dependencies.Metrics.Decision(telemetry.Decision{
 			Kind:      telemetry.KindMutate,
 			Policy:    cmPolicyObj.Name,
@@ -195,29 +188,41 @@ type mutationResult struct {
 	Outcome telemetry.Outcome
 	Reason  telemetry.Reason
 
+	// Err is what went wrong, for the logs
+	Err error
+
 	// Warning is a message for the user, empty when there is nothing to say
 	Warning string
 }
 
-// mutateWith applies the conditions and the patch of one policy to the object
+// mutateWith applies the patch of one policy to the object, when its conditions were met
 func (s *HttpServer) mutateWith(
 	policy *v1alpha1.ClusterMutationPolicy,
 	data *template.InjectedData,
 	object []byte,
+	prepared evaluator.Result,
 ) mutationResult {
 
-	conditionsPassed, condErr := common.IsPassingConditions(s.dependencies.Engines, policy.Spec.Conditions, data)
-	if condErr != nil {
-		return mutationResult{
-			Patched: object,
-			Outcome: telemetry.OutcomeFailed,
-			Reason:  telemetry.ReasonConditions,
-			Warning: fmt.Sprintf("admitik: policy '%s' could not evaluate its conditions, so it was skipped", policy.Name),
+	if !prepared.Passed {
+		if prepared.Reason == telemetry.ReasonConditions {
+			return mutationResult{
+				Patched: object,
+				Outcome: telemetry.OutcomeFailed,
+				Reason:  telemetry.ReasonConditions,
+				Err:     prepared.Err,
+				Warning: fmt.Sprintf("admitik: policy '%s' could not evaluate its conditions, so it was skipped", policy.Name),
+			}
 		}
+
+		return mutationResult{Patched: object, Outcome: telemetry.OutcomeSkipped, Reason: prepared.Reason}
 	}
 
-	if !conditionsPassed {
-		return mutationResult{Patched: object, Outcome: telemetry.OutcomeSkipped}
+	// A broken source does not stop the policy, but the user has to know
+	warning := ""
+	if prepared.Reason == telemetry.ReasonSources {
+		warning = fmt.Sprintf(
+			"admitik: policy '%s' could not read its sources, so it was applied with the objects available",
+			policy.Name)
 	}
 
 	parsedPatch, err := s.dependencies.Engines.Evaluate(policy.Spec.Patch.Engine, policy.Spec.Patch.Template, data)
@@ -226,6 +231,7 @@ func (s *HttpServer) mutateWith(
 			Patched: object,
 			Outcome: telemetry.OutcomeFailed,
 			Reason:  telemetry.ReasonTemplate,
+			Err:     err,
 			Warning: fmt.Sprintf("admitik: policy '%s' could not render its patch, so the object was not mutated by it", policy.Name),
 		}
 	}
@@ -236,6 +242,7 @@ func (s *HttpServer) mutateWith(
 			Patched: object,
 			Outcome: telemetry.OutcomeFailed,
 			Reason:  telemetry.ReasonPatch,
+			Err:     err,
 			Warning: fmt.Sprintf("admitik: policy '%s' generated an invalid patch, so the object was not mutated by it", policy.Name),
 		}
 	}
@@ -244,6 +251,8 @@ func (s *HttpServer) mutateWith(
 		Patched:    patched,
 		Operations: operations,
 		Outcome:    telemetry.OutcomePatched,
+		Reason:     prepared.Reason,
+		Warning:    warning,
 	}
 }
 

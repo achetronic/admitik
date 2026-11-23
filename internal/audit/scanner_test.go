@@ -34,6 +34,7 @@ import (
 
 	//
 	"github.com/freepik-company/admitik/api/v1alpha1"
+	"github.com/freepik-company/admitik/internal/evaluator"
 	"github.com/freepik-company/admitik/internal/informer"
 	"github.com/freepik-company/admitik/internal/template"
 	"github.com/freepik-company/admitik/internal/template/cel"
@@ -119,10 +120,9 @@ func newTestScanner(t *testing.T, policies []*v1alpha1.ClusterValidationPolicy, 
 	ctx := context.Background()
 
 	return NewScanner(ScannerOptions{}, ScannerDependencies{
-		Client:  reader,
-		Dynamic: dynamicClient,
-		Engines: testEngines(t),
-		Pool:    informer.NewPool(&ctx, nil, 0),
+		Client:    reader,
+		Dynamic:   dynamicClient,
+		Evaluator: evaluator.New(testEngines(t), informer.NewPool(&ctx, nil, 0)),
 	}), reader
 }
 
