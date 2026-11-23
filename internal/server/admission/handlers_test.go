@@ -88,7 +88,7 @@ func testServer(t *testing.T, mutation []*v1alpha1.ClusterMutationPolicy, valida
 	}
 }
 
-func reviewRequest(t *testing.T, operation admissionv1.Operation, object map[string]any) *http.Request {
+func reviewRequest(t *testing.T, object map[string]any) *http.Request {
 	t.Helper()
 
 	objectBytes, err := json.Marshal(object)
@@ -99,7 +99,7 @@ func reviewRequest(t *testing.T, operation admissionv1.Operation, object map[str
 	review := admissionv1.AdmissionReview{
 		Request: &admissionv1.AdmissionRequest{
 			UID:       "test",
-			Operation: operation,
+			Operation: admissionv1.Create,
 			Object:    runtime.RawExtension{Raw: objectBytes},
 			Resource:  metav1.GroupVersionResource{Version: "v1", Resource: "configmaps"},
 			Name:      "demo",
@@ -159,7 +159,7 @@ func TestMutationAppliesThePatch(t *testing.T) {
 	}, nil)
 
 	recorder := httptest.NewRecorder()
-	server.handleMutationRequest(recorder, reviewRequest(t, admissionv1.Create, testObject()))
+	server.handleMutationRequest(recorder, reviewRequest(t, testObject()))
 
 	response := decodeResponse(t, recorder)
 	if !response.Allowed {
@@ -179,7 +179,7 @@ func TestMutationWarnsWhenTheTemplateFails(t *testing.T) {
 	}, nil)
 
 	recorder := httptest.NewRecorder()
-	server.handleMutationRequest(recorder, reviewRequest(t, admissionv1.Create, testObject()))
+	server.handleMutationRequest(recorder, reviewRequest(t, testObject()))
 
 	response := decodeResponse(t, recorder)
 	if !response.Allowed {
@@ -199,7 +199,7 @@ func TestMutationWarnsWhenThePatchIsInvalid(t *testing.T) {
 	}, nil)
 
 	recorder := httptest.NewRecorder()
-	server.handleMutationRequest(recorder, reviewRequest(t, admissionv1.Create, testObject()))
+	server.handleMutationRequest(recorder, reviewRequest(t, testObject()))
 
 	response := decodeResponse(t, recorder)
 	if len(response.Warnings) != 1 {
@@ -214,7 +214,7 @@ func TestMutationWithoutPoliciesDoesNothing(t *testing.T) {
 	server := testServer(t, nil, nil)
 
 	recorder := httptest.NewRecorder()
-	server.handleMutationRequest(recorder, reviewRequest(t, admissionv1.Create, testObject()))
+	server.handleMutationRequest(recorder, reviewRequest(t, testObject()))
 
 	response := decodeResponse(t, recorder)
 	if !response.Allowed {
@@ -251,7 +251,7 @@ func TestValidationRejectsWithThePolicyMessage(t *testing.T) {
 	})
 
 	recorder := httptest.NewRecorder()
-	server.handleValidationRequest(recorder, reviewRequest(t, admissionv1.Create, testObject()))
+	server.handleValidationRequest(recorder, reviewRequest(t, testObject()))
 
 	response := decodeResponse(t, recorder)
 	if response.Allowed {
@@ -268,7 +268,7 @@ func TestValidationInPermissiveModeWarnsAndAllows(t *testing.T) {
 	})
 
 	recorder := httptest.NewRecorder()
-	server.handleValidationRequest(recorder, reviewRequest(t, admissionv1.Create, testObject()))
+	server.handleValidationRequest(recorder, reviewRequest(t, testObject()))
 
 	response := decodeResponse(t, recorder)
 	if !response.Allowed {
@@ -289,7 +289,7 @@ func TestValidationWarnsWhenTheMessageFails(t *testing.T) {
 	server := testServer(t, nil, []*v1alpha1.ClusterValidationPolicy{policy})
 
 	recorder := httptest.NewRecorder()
-	server.handleValidationRequest(recorder, reviewRequest(t, admissionv1.Create, testObject()))
+	server.handleValidationRequest(recorder, reviewRequest(t, testObject()))
 
 	response := decodeResponse(t, recorder)
 	if response.Allowed {
@@ -312,7 +312,7 @@ func TestValidationAllowsWhenTheConditionsPass(t *testing.T) {
 	server := testServer(t, nil, []*v1alpha1.ClusterValidationPolicy{policy})
 
 	recorder := httptest.NewRecorder()
-	server.handleValidationRequest(recorder, reviewRequest(t, admissionv1.Create, testObject()))
+	server.handleValidationRequest(recorder, reviewRequest(t, testObject()))
 
 	response := decodeResponse(t, recorder)
 	if !response.Allowed {

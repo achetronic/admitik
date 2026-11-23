@@ -61,9 +61,9 @@ func testEngines(t *testing.T) *template.Registry {
 	)
 }
 
-func configMap(name, namespace string, labels map[string]any) *unstructured.Unstructured {
+func configMap(name string, labels map[string]any) *unstructured.Unstructured {
 
-	metadata := map[string]any{"name": name, "namespace": namespace}
+	metadata := map[string]any{"name": name, "namespace": "default"}
 	if labels != nil {
 		metadata["labels"] = labels
 	}
@@ -135,9 +135,9 @@ func TestScanCountsCompliantAndNonCompliantObjects(t *testing.T) {
 	})
 
 	scanner, _ := newTestScanner(t, []*v1alpha1.ClusterValidationPolicy{policy},
-		configMap("with-label", "default", map[string]any{"team": "platform"}),
-		configMap("without-label", "default", nil),
-		configMap("other-labels", "default", map[string]any{"app": "demo"}),
+		configMap("with-label", map[string]any{"team": "platform"}),
+		configMap("without-label", nil),
+		configMap("other-labels", map[string]any{"app": "demo"}),
 	)
 
 	report, err := scanner.Scan(context.Background())
@@ -171,12 +171,12 @@ func TestScanKeepsAFewSamples(t *testing.T) {
 	})
 
 	scanner, _ := newTestScanner(t, []*v1alpha1.ClusterValidationPolicy{policy},
-		configMap("one", "default", nil),
-		configMap("two", "default", nil),
-		configMap("three", "default", nil),
-		configMap("four", "default", nil),
-		configMap("five", "default", nil),
-		configMap("six", "default", nil),
+		configMap("one", nil),
+		configMap("two", nil),
+		configMap("three", nil),
+		configMap("four", nil),
+		configMap("five", nil),
+		configMap("six", nil),
 	)
 
 	report, err := scanner.Scan(context.Background())
@@ -202,7 +202,7 @@ func TestScanWritesOneReport(t *testing.T) {
 	})
 
 	scanner, reader := newTestScanner(t, []*v1alpha1.ClusterValidationPolicy{policy},
-		configMap("one", "default", nil),
+		configMap("one", nil),
 	)
 
 	ctx := context.Background()
@@ -275,7 +275,7 @@ func TestScanCountsErrors(t *testing.T) {
 	})
 
 	scanner, _ := newTestScanner(t, []*v1alpha1.ClusterValidationPolicy{policy},
-		configMap("one", "default", nil),
+		configMap("one", nil),
 	)
 
 	report, err := scanner.Scan(context.Background())
