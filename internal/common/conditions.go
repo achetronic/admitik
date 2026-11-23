@@ -25,13 +25,17 @@ import (
 )
 
 // IsPassingConditions iterate over a list of templated conditions and return whether they are passing or not
-func IsPassingConditions(conditionList []v1alpha1.ConditionT, injectedData *template.PolicyEvaluationDataT) (result bool, err error) {
+func IsPassingConditions(
+	engines *template.Registry,
+	conditionList []v1alpha1.ConditionT,
+	injectedData *template.InjectedData,
+) (result bool, err error) {
+
 	for _, condition := range conditionList {
 
-		// Choose templating engine. Maybe more will be added in the future
-		parsedKey, condErr := template.EvaluateTemplate(condition.Engine, condition.Key, injectedData)
+		parsedKey, condErr := engines.Evaluate(condition.Engine, condition.Key, injectedData)
 		if condErr != nil {
-			return false, fmt.Errorf("failed condition '%s': %s", condition.Name, condErr.Error())
+			return false, fmt.Errorf("failed condition '%s': %w", condition.Name, condErr)
 		}
 
 		if parsedKey != condition.Value {

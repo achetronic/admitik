@@ -35,9 +35,10 @@ import (
 
 // FetchPolicySources TODO
 func FetchPolicySources[T policystore.PolicyResourceI](
+	engines *template.Registry,
 	sourcesReg *sources.SourcesRegistry,
 	policy T,
-	injectedData template.InjectedDataI, // TODO: This can be present, or not
+	injectedData *template.InjectedData,
 ) (results map[int][]map[string]any, err error) {
 
 	var tmpErrors []error
@@ -57,7 +58,7 @@ func FetchPolicySources[T policystore.PolicyResourceI](
 		sourceItemCopy := sourceItem.DeepCopy()
 
 		// Resolve CEL expressions in filters
-		if localErr := resolveInlineCelExpressionsRecursive(reflect.ValueOf(sourceItemCopy.Filters), injectedData); localErr != nil {
+		if localErr := resolveInlineCelExpressionsRecursive(engines, reflect.ValueOf(sourceItemCopy.Filters), injectedData); localErr != nil {
 			tmpErrors = append(tmpErrors, fmt.Errorf("failed to resolve CEL in filters for GVR '%v': %v", GvrString(gvr), localErr))
 			results[sourceIndex] = []map[string]any{}
 			continue
@@ -80,7 +81,7 @@ func FetchPolicySources[T policystore.PolicyResourceI](
 }
 
 // resolveInlineCelExpressionsRecursive walks filters structure and resolves CEL in all strings
-func resolveInlineCelExpressionsRecursive(v reflect.Value, injectedData template.InjectedDataI) error {
+func resolveInlineCelExpressionsRecursive(engines *template.Registry, v reflect.Value, injectedData *template.InjectedData) error {
 	if !v.IsValid() || (v.Kind() == reflect.Ptr && v.IsNil()) {
 		return nil
 	}
@@ -92,7 +93,7 @@ func resolveInlineCelExpressionsRecursive(v reflect.Value, injectedData template
 	switch v.Kind() {
 	case reflect.String:
 		if v.CanSet() {
-			resolved, err := template.EvaluateAndReplaceCelExpressions(v.String(), injectedData)
+			resolved, err := engines.Evaluate(template.EnginePlainWithCel, v.String(), injectedData)
 			if err != nil {
 				return err
 			}
@@ -101,7 +102,7 @@ func resolveInlineCelExpressionsRecursive(v reflect.Value, injectedData template
 
 	case reflect.Slice:
 		for i := 0; i < v.Len(); i++ {
-			if err := resolveInlineCelExpressionsRecursive(v.Index(i), injectedData); err != nil {
+			if err := resolveInlineCelExpressionsRecursive(engines, v.Index(i), injectedData); err != nil {
 				return err
 			}
 		}
@@ -109,7 +110,7 @@ func resolveInlineCelExpressionsRecursive(v reflect.Value, injectedData template
 	case reflect.Map:
 		for iter := v.MapRange(); iter.Next(); {
 			if iter.Value().Kind() == reflect.String {
-				resolved, err := template.EvaluateAndReplaceCelExpressions(iter.Value().String(), injectedData)
+				resolved, err := engines.Evaluate(template.EnginePlainWithCel, iter.Value().String(), injectedData)
 				if err != nil {
 					return err
 				}
@@ -119,7 +120,7 @@ func resolveInlineCelExpressionsRecursive(v reflect.Value, injectedData template
 
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
-			if err := resolveInlineCelExpressionsRecursive(v.Field(i), injectedData); err != nil {
+			if err := resolveInlineCelExpressionsRecursive(engines, v.Field(i), injectedData); err != nil {
 				return err
 			}
 		}

@@ -14,8 +14,23 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package template
+package plain
 
-func EvaluateTemplatePlain(template string, injectedData InjectedDataI) (result string, err error) {
-	return template, nil
+import (
+	"github.com/freepik-company/admitik/internal/template"
+)
+
+// Engine returns the source untouched. It is used for templates that do not need evaluation
+type Engine struct{}
+
+func New() *Engine {
+	return &Engine{}
+}
+
+func (e *Engine) Name() string {
+	return template.EnginePlain
+}
+
+func (e *Engine) Evaluate(source string, data *template.InjectedData) (string, error) {
+	return source, nil
 }

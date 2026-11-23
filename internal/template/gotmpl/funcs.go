@@ -14,14 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package template
+package gotmpl
 
 import (
 	"bytes"
 	"encoding/json"
 	"log"
 	"strings"
-	"text/template"
+	textTemplate "text/template"
 
 	//
 	"github.com/BurntSushi/toml"
@@ -29,43 +29,8 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// FOLKS, ATTENTION HERE:
-// Some parts of the magic you are going to see are replicated from Helm templating engine.
-// We decided to use Golang templating and add, more or less, the same extra functionality to this operator
-// for people who are already comfortable with Helm. Not all the extra functionality was added to keep this simpler.
-// Ref: https://github.com/helm/helm/blob/main/pkg/engine/funcs.go
-
-func EvaluateTemplateGotmpl(templateString string, injectedData InjectedDataI) (result string, err error) {
-
-	// setVar function is defined as clojure to intercept 'data'
-	// done this way as 'injectedData' being passed as func param in later func map is not convenient
-	setVar := func(key string, value interface{}) string {
-		injectedData.SetVar(key, value)
-		return ""
-	}
-
-	templateFunctionsMap := GetFunctionsMap()
-	templateFunctionsMap["setVar"] = setVar
-
-	// Create a Template object from the given string
-	parsedTemplate, err := template.New("main").Funcs(templateFunctionsMap).Parse(templateString)
-	if err != nil {
-		return result, err
-	}
-
-	// Create a new buffer to store the templating result
-	buffer := new(bytes.Buffer)
-
-	err = parsedTemplate.Execute(buffer, injectedData.ToMap())
-	if err != nil {
-		return result, err
-	}
-
-	return buffer.String(), nil
-}
-
-// GetFunctionsMap return a map with equivalency between functions for inside templating and real Golang ones
-func GetFunctionsMap() template.FuncMap {
+// FunctionsMap returns the functions available inside a template
+func FunctionsMap() textTemplate.FuncMap {
 	f := sprig.TxtFuncMap()
 
 	// Delete risky functions
@@ -74,7 +39,7 @@ func GetFunctionsMap() template.FuncMap {
 	delete(f, "expandenv")
 
 	// Add some extra functionality
-	extra := template.FuncMap{
+	extra := textTemplate.FuncMap{
 		// Helm related funcs
 		"toToml":        toTOML,
 		"toYaml":        toYAML,
@@ -86,7 +51,6 @@ func GetFunctionsMap() template.FuncMap {
 
 		// Admitik related funcs
 		"logPrintf": logPrintf,
-		//"setVar":    func(string, interface{}) string,
 	}
 
 	for k, v := range extra {

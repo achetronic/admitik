@@ -29,6 +29,7 @@ import (
 	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
 	resourceObserverRegistry "github.com/freepik-company/admitik/internal/registry/resourceobserver"
 	sourcesRegistry "github.com/freepik-company/admitik/internal/registry/sources"
+	"github.com/freepik-company/admitik/internal/template"
 )
 
 const (
@@ -41,8 +42,7 @@ type EventDispatcherDependencies struct {
 	ClusterGenerationPolicyRegistry *policyStore.PolicyStore[*v1alpha1.ClusterGenerationPolicy]
 	SourcesRegistry                 *sourcesRegistry.SourcesRegistry
 	ResourceObserverRegistry        *resourceObserverRegistry.ResourceObserverRegistry
-
-	//
+	Engines                         *template.Registry
 }
 
 type EventDispatcher struct {
@@ -101,6 +101,7 @@ func (d *EventDispatcher) getInitializedProcessors() (processorsMap map[string]P
 	processors[ObserverTypeClusterGenerationPolicies] = NewGenerationProcessor(GenerationProcessorDependencies{
 		ClusterGenerationPolicyRegistry: d.dependencies.ClusterGenerationPolicyRegistry,
 		SourcesRegistry:                 d.dependencies.SourcesRegistry,
+		Engines:                         d.dependencies.Engines,
 		KubeAvailableResourceList:       &d.kubeAvailableResourceList,
 	})
 

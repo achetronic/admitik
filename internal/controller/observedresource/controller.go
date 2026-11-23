@@ -44,6 +44,7 @@ import (
 	resourceInformerRegistry "github.com/freepik-company/admitik/internal/registry/resourceinformer"
 	resourceObserverRegistry "github.com/freepik-company/admitik/internal/registry/resourceobserver"
 	sourcesRegistry "github.com/freepik-company/admitik/internal/registry/sources"
+	"github.com/freepik-company/admitik/internal/template"
 )
 
 const (
@@ -83,6 +84,9 @@ type ObservedResourceControllerDependencies struct {
 	SourcesRegistry                 *sourcesRegistry.SourcesRegistry
 	ResourceInformerRegistry        *resourceInformerRegistry.ResourceInformerRegistry
 	ResourceObserverRegistry        *resourceObserverRegistry.ResourceObserverRegistry
+
+	// Engines renders the conditions and the generated objects
+	Engines *template.Registry
 }
 
 // ObservedResourceController represents the controller that triggers parallel threads.
@@ -168,6 +172,7 @@ func (r *ObservedResourceController) Start(ctx context.Context) error {
 		ClusterGenerationPolicyRegistry: r.Dependencies.ClusterGenerationPolicyRegistry,
 		SourcesRegistry:                 r.Dependencies.SourcesRegistry,
 		ResourceObserverRegistry:        r.Dependencies.ResourceObserverRegistry,
+		Engines:                         r.Dependencies.Engines,
 	})
 
 	// Start cleaner for dead informers

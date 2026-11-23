@@ -31,7 +31,7 @@ import (
 // populatePolicyDataFromAdmission enriches the policy evaluation context with data from the admission request.
 // Extracts data such as the operation type, target object or previous object state (for updates) from the AdmissionReview
 // and populates the corresponding fields in the policy evaluation data structure.
-func (s *HttpServer) populatePolicyDataFromAdmission(adReview *admissionv1.AdmissionReview, injectedData *template.PolicyEvaluationDataT) (err error) {
+func (s *HttpServer) populatePolicyDataFromAdmission(adReview *admissionv1.AdmissionReview, injectedData *template.InjectedData) (err error) {
 
 	// Store desired operation
 	injectedData.Operation = common.GetNormalizedOperation(adReview.Request.Operation)

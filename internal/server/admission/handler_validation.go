@@ -103,11 +103,10 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 
 	// Create an object that will be injected in conditions/message
 	// in later template evaluation stage
-	commonTemplateInjectedObject := template.PolicyEvaluationDataT{}
-	commonTemplateInjectedObject.Initialize()
+	commonTemplateInjectedObject := template.NewInjectedData()
 
 	// Store data for later: operation, old+current object
-	err = s.populatePolicyDataFromAdmission(&requestObj, &commonTemplateInjectedObject)
+	err = s.populatePolicyDataFromAdmission(&requestObj, commonTemplateInjectedObject)
 	if err != nil {
 		logger.Info(fmt.Sprintf("failed extracting data from AdmissionReview: %s", err.Error()))
 		return
@@ -125,17 +124,16 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 		logger = logger.WithValues("ClusterValidationPolicy", caPolicyObj.Name)
 
 		// Retrieve the sources declared per policy
-		triggerInjectedObject := commonTemplateInjectedObject.TriggerInjectedDataT
-		tmpFetchedPolicySources, fetchErr := common.FetchPolicySources(s.dependencies.SourcesRegistry, caPolicyObj, &triggerInjectedObject)
+		tmpFetchedPolicySources, fetchErr := common.FetchPolicySources(s.dependencies.Engines, s.dependencies.SourcesRegistry, caPolicyObj, commonTemplateInjectedObject)
 		if fetchErr != nil {
 			logger.Info("failed fetching sources. Broken ones will be empty", "error", fetchErr.Error())
 		}
 
-		specificTemplateInjectedObject := commonTemplateInjectedObject
+		specificTemplateInjectedObject := *commonTemplateInjectedObject
 		specificTemplateInjectedObject.Sources = tmpFetchedPolicySources
 
 		// Evaluate template conditions
-		conditionsPassed, condErr := common.IsPassingConditions(caPolicyObj.Spec.Conditions, &specificTemplateInjectedObject)
+		conditionsPassed, condErr := common.IsPassingConditions(s.dependencies.Engines, caPolicyObj.Spec.Conditions, &specificTemplateInjectedObject)
 		if condErr != nil {
 			logger.Info(fmt.Sprintf("failed evaluating conditions: %s", condErr.Error()))
 		}
@@ -147,7 +145,7 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 
 		// When some condition is not met, evaluate message's template and emit a response
 		var parsedMessage string
-		parsedMessage, err = template.EvaluateTemplate(caPolicyObj.Spec.Message.Engine, caPolicyObj.Spec.Message.Template, &specificTemplateInjectedObject)
+		parsedMessage, err = s.dependencies.Engines.Evaluate(caPolicyObj.Spec.Message.Engine, caPolicyObj.Spec.Message.Template, &specificTemplateInjectedObject)
 		if err != nil {
 			logger.Info(fmt.Sprintf("failed parsing message template: %s", err.Error()))
 			parsedMessage = "Reason unavailable: message template failed. More info in controller logs."

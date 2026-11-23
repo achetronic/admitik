@@ -56,6 +56,11 @@ import (
 	resourceObserverRegistry "github.com/freepik-company/admitik/internal/registry/resourceobserver"
 	sourcesRegistry "github.com/freepik-company/admitik/internal/registry/sources"
 	"github.com/freepik-company/admitik/internal/server/admission"
+	"github.com/freepik-company/admitik/internal/template"
+	"github.com/freepik-company/admitik/internal/template/cel"
+	"github.com/freepik-company/admitik/internal/template/gotmpl"
+	"github.com/freepik-company/admitik/internal/template/plain"
+	"github.com/freepik-company/admitik/internal/template/starlark"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -357,6 +362,13 @@ func main() {
 		admission.AdmissionServerValidationPath,
 		admission.AdmissionServerMutationPath)
 
+	// Create the template engines that will be used to render conditions, patches and generated objects
+	engines, err := newEngines()
+	if err != nil {
+		setupLog.Error(err, "unable to set up template engines")
+		os.Exit(1)
+	}
+
 	// Create registries managers that will be used by several controllers
 	clusterValidationPolicyReg := policyStore.NewPolicyStore[*v1alpha1.ClusterValidationPolicy]()
 	clusterMutationPolicyReg := policyStore.NewPolicyStore[*v1alpha1.ClusterMutationPolicy]()
@@ -441,6 +453,7 @@ func main() {
 			SourcesRegistry:                 sourcesReg,
 			ResourceInformerRegistry:        resourceInformerReg,
 			ResourceObserverRegistry:        resourceObserverReg,
+			Engines:                         engines,
 		},
 	}
 	if err = mgr.Add(&observedResourceController); err != nil {
@@ -494,6 +507,7 @@ func main() {
 			SourcesRegistry:                 sourcesReg,
 			ClusterValidationPolicyRegistry: clusterValidationPolicyReg,
 			ClusterMutationPolicyRegistry:   clusterMutationPolicyReg,
+			Engines:                         engines,
 		})
 	if err = mgr.Add(admissionServer); err != nil {
 		setupLog.Error(err, "failed adding admission server controller to manager")
@@ -516,4 +530,21 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// newEngines builds the registry with every available template engine
+func newEngines() (*template.Registry, error) {
+
+	celExpression, err := cel.NewExpression()
+	if err != nil {
+		return nil, err
+	}
+
+	return template.NewRegistry(
+		celExpression,
+		cel.NewPlaceholders(celExpression),
+		gotmpl.New(),
+		starlark.New(),
+		plain.New(),
+	), nil
 }

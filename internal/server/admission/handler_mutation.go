@@ -109,11 +109,10 @@ func (s *HttpServer) handleMutationRequest(response http.ResponseWriter, request
 
 	// Create an object that will be injected in conditions/message
 	// in later template evaluation stage
-	commonTemplateInjectedObject := template.PolicyEvaluationDataT{}
-	commonTemplateInjectedObject.Initialize()
+	commonTemplateInjectedObject := template.NewInjectedData()
 
 	// Store data for later: operation, old+current object
-	err = s.populatePolicyDataFromAdmission(&requestObj, &commonTemplateInjectedObject)
+	err = s.populatePolicyDataFromAdmission(&requestObj, commonTemplateInjectedObject)
 	if err != nil {
 		logger.Info(fmt.Sprintf("failed extracting data from AdmissionReview: %s", err.Error()))
 		return
@@ -132,17 +131,16 @@ func (s *HttpServer) handleMutationRequest(response http.ResponseWriter, request
 		logger = logger.WithValues("ClusterMutationPolicy", cmPolicyObj.Name)
 
 		// Retrieve the sources declared per policy
-		triggerInjectedObject := commonTemplateInjectedObject.TriggerInjectedDataT
-		tmpFetchedPolicySources, fetchErr := common.FetchPolicySources(s.dependencies.SourcesRegistry, cmPolicyObj, &triggerInjectedObject)
+		tmpFetchedPolicySources, fetchErr := common.FetchPolicySources(s.dependencies.Engines, s.dependencies.SourcesRegistry, cmPolicyObj, commonTemplateInjectedObject)
 		if fetchErr != nil {
 			logger.Info("failed fetching sources. Broken ones will be empty", "error", fetchErr.Error())
 		}
 
-		specificTemplateInjectedObject := commonTemplateInjectedObject
+		specificTemplateInjectedObject := *commonTemplateInjectedObject
 		specificTemplateInjectedObject.Sources = tmpFetchedPolicySources
 
 		// Evaluate template conditions
-		conditionsPassed, condErr := common.IsPassingConditions(cmPolicyObj.Spec.Conditions, &specificTemplateInjectedObject)
+		conditionsPassed, condErr := common.IsPassingConditions(s.dependencies.Engines, cmPolicyObj.Spec.Conditions, &specificTemplateInjectedObject)
 		if condErr != nil {
 			logger.Info("failed evaluating conditions", "error", condErr.Error())
 		}
@@ -161,7 +159,7 @@ func (s *HttpServer) handleMutationRequest(response http.ResponseWriter, request
 		var tmpJsonPatchOperations jsondiff.Patch
 		var tmpPatchedObjectBytes []byte
 
-		parsedPatch, err = template.EvaluateTemplate(cmPolicyObj.Spec.Patch.Engine, cmPolicyObj.Spec.Patch.Template, &specificTemplateInjectedObject)
+		parsedPatch, err = s.dependencies.Engines.Evaluate(cmPolicyObj.Spec.Patch.Engine, cmPolicyObj.Spec.Patch.Template, &specificTemplateInjectedObject)
 		if err != nil {
 			logger.Info(fmt.Sprintf("failed parsing patch template: %s", err.Error()))
 			kubeEventMessage = "Patch template failed. More info in controller logs."
