@@ -17,8 +17,9 @@ limitations under the License.
 package common
 
 import (
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"strings"
+
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 func GvrString(gvr schema.GroupVersionResource) string {

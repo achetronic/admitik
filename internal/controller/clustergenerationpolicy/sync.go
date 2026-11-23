@@ -18,9 +18,10 @@ package clustergenerationpolicy
 
 import (
 	"context"
-	"github.com/freepik-company/admitik/internal/pubsub"
 	"slices"
 	"strings"
+
+	"github.com/freepik-company/admitik/internal/pubsub"
 
 	//
 	"k8s.io/apimachinery/pkg/watch"

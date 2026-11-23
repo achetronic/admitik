@@ -19,9 +19,10 @@ package clustervalidationpolicy
 import (
 	"context"
 	"fmt"
-	"github.com/freepik-company/admitik/internal/pubsub"
 	"slices"
 	"strings"
+
+	"github.com/freepik-company/admitik/internal/pubsub"
 
 	//
 	admissionregv1 "k8s.io/api/admissionregistration/v1"

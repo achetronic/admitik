@@ -18,8 +18,9 @@ package resourceinformer
 
 import (
 	"errors"
-	"golang.org/x/exp/maps"
 	"time"
+
+	"golang.org/x/exp/maps"
 )
 
 // NewResourceInformerRegistry TODO
