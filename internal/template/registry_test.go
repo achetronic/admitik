@@ -135,9 +135,9 @@ func TestEngines(t *testing.T) {
 			expected: "demo",
 		},
 		{
-			name:     "starlark reads the sources by the index as text, like the existing policies do",
+			name:     "starlark reads the sources by integer index, like CEL does",
 			engine:   template.EngineStarlark,
-			source:   "print(sources[\"0\"][1][\"metadata\"][\"name\"])",
+			source:   "print(sources[0][1][\"metadata\"][\"name\"])",
 			expected: "second",
 		},
 		{
@@ -216,7 +216,7 @@ func TestStarlarkCannotMutateTheSources(t *testing.T) {
 	engines := mustRegistry(t)
 
 	_, err := engines.Evaluate(template.EngineStarlark, `
-sources["0"].append({})
+sources[0].append({})
 `, testData())
 
 	if err == nil {

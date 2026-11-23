@@ -18,7 +18,6 @@ package sources
 
 import (
 	"golang.org/x/exp/maps"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -28,27 +27,4 @@ func (m *SourcesRegistry) GetRegisteredResourceTypes() []schema.GroupVersionReso
 	defer m.mu.RUnlock()
 
 	return maps.Keys(m.informers)
-}
-
-// GetResources returns all the cached objects of the provided type.
-// Returning pointers to increase performance during templating stage with huge lists
-func (m *SourcesRegistry) GetResources(gvr schema.GroupVersionResource) (results []*map[string]any) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	//
-	informer, informerFound := m.informers[gvr]
-
-	if !informerFound || informer == nil {
-		return []*map[string]any{}
-	}
-
-	pointerList := m.informers[gvr].GetStore().List()
-
-	for _, item := range pointerList {
-		obj := item.(*unstructured.Unstructured)
-		results = append(results, &obj.Object)
-	}
-
-	return results
 }

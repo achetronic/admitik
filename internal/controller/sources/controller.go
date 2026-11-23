@@ -152,7 +152,11 @@ func (r *SourcesController) launchDesiredInformers() {
 			continue
 		}
 
-		r.Dependencies.SourcesRegistry.RegisterInformer(gvr, newInformer)
+		if err := r.Dependencies.SourcesRegistry.RegisterInformer(gvr, newInformer); err != nil {
+			logger.Error(err, "Failed registering informer", "source", resourceType)
+			continue
+		}
+
 		newInformer.Start()
 	}
 }

@@ -31,23 +31,85 @@ import (
 	"github.com/freepik-company/admitik/internal/template"
 )
 
-// forEvaluation copies a shared, already frozen context and gives it its own 'vars' dict.
-// That is what sharing a cached tree requires: the corpus is shared, vars is per evaluation
-func forEvaluation(shared starlark.StringDict) starlark.StringDict {
-
-	local := make(starlark.StringDict, len(shared))
-	for name, value := range shared {
-		local[name] = value
-	}
-
-	local["__raw_vars"] = starlark.NewDict(0)
-
-	return local
+func megabytes(bytes uint64) string {
+	return fmt.Sprintf("%.1f MiB", float64(bytes)/(1024*1024))
 }
 
-// largeContext builds a context resembling a policy that lists configmaps across a cluster.
-// Every object is close to a real ConfigMap: labels, annotations and some data
-func largeContext(count int) *template.InjectedData {
+func heapAllocated() uint64 {
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+
+	return stats.HeapAlloc
+}
+
+func totalAllocated() uint64 {
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+
+	return stats.TotalAlloc
+}
+
+// liveHeap returns the heap held by live objects after a collection
+func liveHeap() uint64 {
+	runtime.GC()
+	runtime.GC()
+
+	return heapAllocated()
+}
+
+// measurement holds what an operation cost in memory
+type measurement struct {
+	peakAllocated uint64 // el pico de memoria viva durante la operacion
+	totalChurn    uint64 // memoria total reservada, incluida la que se tira
+	elapsed       time.Duration
+}
+
+// measure runs the operation while sampling the live heap, so the peak is a real peak
+// and not the value left when it finishes
+func measure(operation func()) measurement {
+
+	baseline := liveHeap()
+	churnBefore := totalAllocated()
+
+	stop := make(chan struct{})
+	peak := baseline
+	sampled := make(chan struct{})
+
+	go func() {
+		defer close(sampled)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				if current := heapAllocated(); current > peak {
+					peak = current
+				}
+				time.Sleep(2 * time.Millisecond)
+			}
+		}
+	}()
+
+	started := time.Now()
+	operation()
+	elapsed := time.Since(started)
+	close(stop)
+	<-sampled
+
+	return measurement{
+		peakAllocated: peak - baseline,
+		totalChurn:    totalAllocated() - churnBefore,
+		elapsed:       elapsed,
+	}
+}
+
+func (m measurement) String() string {
+	return fmt.Sprintf("pico %s, reservado %s, %s",
+		megabytes(m.peakAllocated), megabytes(m.totalChurn), m.elapsed.Round(time.Millisecond))
+}
+
+// configMaps builds a context with many plain objects
+func configMaps(count int) *template.InjectedData {
 
 	objects := make([]map[string]any, 0, count)
 	for index := 0; index < count; index++ {
@@ -87,235 +149,6 @@ func largeContext(count int) *template.InjectedData {
 	data.Sources = map[int][]map[string]any{0: objects}
 
 	return data
-}
-
-func megabytes(bytes uint64) string {
-	return fmt.Sprintf("%.1f MiB", float64(bytes)/(1024*1024))
-}
-
-func heapAllocated() uint64 {
-	var stats runtime.MemStats
-	runtime.ReadMemStats(&stats)
-
-	return stats.HeapAlloc
-}
-
-func totalAllocated() uint64 {
-	var stats runtime.MemStats
-	runtime.ReadMemStats(&stats)
-
-	return stats.TotalAlloc
-}
-
-// liveHeap returns the heap held by live objects after a collection
-func liveHeap() uint64 {
-	runtime.GC()
-	runtime.GC()
-
-	return heapAllocated()
-}
-
-// measurement holds what an operation cost in memory
-type measurement struct {
-	peakAllocated uint64 // el pico de memoria viva durante la operacion
-	totalChurn    uint64 // memoria total reservada, incluida la que se tira
-	liveAfter     uint64 // memoria retenida al terminar
-	elapsed       time.Duration
-}
-
-// measure runs the operation while sampling the live heap, so the peak is a real peak
-// and not the value left when it finishes
-func measure(operation func()) measurement {
-
-	baseline := liveHeap()
-	churnBefore := totalAllocated()
-
-	stop := make(chan struct{})
-	peak := uint64(0)
-	sampled := make(chan struct{})
-
-	go func() {
-		defer close(sampled)
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-				if current := heapAllocated(); current > peak {
-					peak = current
-				}
-				time.Sleep(2 * time.Millisecond)
-			}
-		}
-	}()
-
-	started := time.Now()
-	operation()
-	elapsed := time.Since(started)
-	close(stop)
-	<-sampled
-
-	churn := totalAllocated() - churnBefore
-	live := liveHeap()
-
-	if peak < baseline {
-		peak = baseline
-	}
-
-	return measurement{
-		peakAllocated: peak - baseline,
-		totalChurn:    churn,
-		liveAfter:     live - min(live, baseline),
-		elapsed:       elapsed,
-	}
-}
-
-func (m measurement) String() string {
-	return fmt.Sprintf("pico %s, reservado %s, retenido %s, %s",
-		megabytes(m.peakAllocated), megabytes(m.totalChurn), megabytes(m.liveAfter), m.elapsed.Round(time.Millisecond))
-}
-
-// TestConversionMemoryAtScale compares building the Starlark tree through JSON, which is what the
-// engine used to do, with building it directly
-func TestConversionMemoryAtScale(t *testing.T) {
-
-	if testing.Short() {
-		t.Skip("medicion de memoria: se omite con -short")
-	}
-
-	const objects = 12000
-
-	data := largeContext(objects)
-	values := data.ToMap()
-
-	t.Logf("contexto de %d objetos: %s en Go", objects, megabytes(liveHeap()))
-
-	var throughJSON []starlark.Value
-	jsonMeasurement := measure(func() {
-		throughJSON = make([]starlark.Value, 0, len(values))
-		for _, value := range values {
-			converted, err := starletconv.GoToStarlarkViaJSON(value)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			throughJSON = append(throughJSON, converted)
-		}
-		for _, value := range throughJSON {
-			value.Freeze()
-		}
-	})
-	runtime.KeepAlive(throughJSON)
-	throughJSON = nil
-
-	t.Logf("json   : %s", jsonMeasurement)
-
-	var direct []starlark.Value
-	directMeasurement := measure(func() {
-		direct = make([]starlark.Value, 0, len(values))
-		for _, value := range values {
-			converted, err := toStarlark(value)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			direct = append(direct, converted)
-		}
-		for _, value := range direct {
-			value.Freeze()
-		}
-	})
-	runtime.KeepAlive(direct)
-	direct = nil
-
-	t.Logf("directo: %s", directMeasurement)
-
-	if directMeasurement.peakAllocated >= jsonMeasurement.peakAllocated {
-		t.Errorf("the direct conversion peaks at %s, the JSON one at %s",
-			megabytes(directMeasurement.peakAllocated), megabytes(jsonMeasurement.peakAllocated))
-	}
-}
-
-// TestConcurrentEvaluationMemoryAtScale measures the case that hurts in production: several
-// admission requests being evaluated at the same time, each one rebuilding the tree
-func TestConcurrentEvaluationMemoryAtScale(t *testing.T) {
-
-	if testing.Short() {
-		t.Skip("medicion de memoria: se omite con -short")
-	}
-
-	const objects = 12000
-	const concurrency = 8
-
-	engine := New()
-	source := `
-def run():
-    total = 0
-    for item in sources["0"]:
-        total = total + len(item["metadata"]["labels"])
-    print(str(total))
-
-run()
-`
-
-	data := largeContext(objects)
-
-	measurementWithNewTree := measure(func() {
-		var waitGroup sync.WaitGroup
-		for worker := 0; worker < concurrency; worker++ {
-			waitGroup.Add(1)
-			go func() {
-				defer waitGroup.Done()
-
-				// Cada evaluacion escribe en su propio contexto, como en un request real
-				local := *data
-				local.Vars = map[string]any{}
-
-				if _, err := engine.Evaluate(source, &local); err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
-			}()
-		}
-		waitGroup.Wait()
-	})
-
-	t.Logf("%d evaluaciones a la vez, arbol nuevo en cada una: %s", concurrency, measurementWithNewTree)
-
-	// The same, but with the tree built once and shared. This is what caching by cache
-	// version would give, and it is the target of the next phase
-	values := data.ToMap()
-	predeclared, err := predeclaredValues(values)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	program, err := engine.programs.get(source, contextKeys(values), sortedNames(predeclared))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	measurementWithSharedTree := measure(func() {
-		var waitGroup sync.WaitGroup
-		for worker := 0; worker < concurrency; worker++ {
-			waitGroup.Add(1)
-			go func() {
-				defer waitGroup.Done()
-				thread := &starlark.Thread{Name: "template", Print: func(_ *starlark.Thread, _ string) {}}
-				if _, err := program.Init(thread, forEvaluation(predeclared)); err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
-			}()
-		}
-		waitGroup.Wait()
-	})
-
-	t.Logf("%d evaluaciones a la vez, arbol compartido y congelado: %s", concurrency, measurementWithSharedTree)
-
-	// Guard for the cached tree work: rebuilding it per evaluation must stay far more expensive
-	if measurementWithSharedTree.peakAllocated*4 > measurementWithNewTree.peakAllocated {
-		t.Errorf("sharing the tree saved less than expected: %s against %s",
-			megabytes(measurementWithSharedTree.peakAllocated), megabytes(measurementWithNewTree.peakAllocated))
-	}
-
-	runtime.KeepAlive(predeclared)
 }
 
 // httpRoutes builds the corpus of the cross-check policies: many Gateway API routes, each one
@@ -373,6 +206,111 @@ func httpRoutes(count int) *template.InjectedData {
 	return data
 }
 
+// contextCopy returns a copy of the context, as every request builds its own
+func contextCopy(data *template.InjectedData) *template.InjectedData {
+	local := *data
+	local.Vars = map[string]any{}
+
+	return &local
+}
+
+// TestConversionMemoryAtScale compares building the Starlark tree through JSON, which is what the
+// engine used to do, with building it directly
+func TestConversionMemoryAtScale(t *testing.T) {
+
+	if testing.Short() {
+		t.Skip("medicion de memoria: se omite con -short")
+	}
+
+	const objects = 12000
+
+	values := configMaps(objects).ToMap()
+
+	t.Logf("contexto de %d objetos: %s en Go", objects, megabytes(liveHeap()))
+
+	var throughJSON []starlark.Value
+	jsonMeasurement := measure(func() {
+		throughJSON = make([]starlark.Value, 0, len(values))
+		for _, value := range values {
+			converted, err := starletconv.GoToStarlarkViaJSON(value)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			throughJSON = append(throughJSON, converted)
+		}
+	})
+	runtime.KeepAlive(throughJSON)
+	throughJSON = nil
+
+	t.Logf("json   : %s", jsonMeasurement)
+
+	var direct []starlark.Value
+	directMeasurement := measure(func() {
+		direct = make([]starlark.Value, 0, len(values))
+		for _, value := range values {
+			converted, err := toStarlark(value)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			direct = append(direct, converted)
+		}
+	})
+	runtime.KeepAlive(direct)
+	direct = nil
+
+	t.Logf("directo: %s", directMeasurement)
+
+	if directMeasurement.peakAllocated >= jsonMeasurement.peakAllocated {
+		t.Errorf("the direct conversion peaks at %s, the JSON one at %s",
+			megabytes(directMeasurement.peakAllocated), megabytes(jsonMeasurement.peakAllocated))
+	}
+}
+
+// TestConcurrentEvaluationMemoryAtScale measures the case that hurts in production: several
+// admission requests evaluated at the same time, with and without the reused tree
+func TestConcurrentEvaluationMemoryAtScale(t *testing.T) {
+
+	if testing.Short() {
+		t.Skip("medicion de memoria: se omite con -short")
+	}
+
+	const objects = 12000
+	const concurrency = 8
+
+	engine := New()
+	source := `
+def run():
+    total = 0
+    for item in sources[0]:
+        total = total + len(item["metadata"]["labels"])
+    print(str(total))
+
+run()
+`
+
+	data := configMaps(objects)
+
+	rebuilding := measure(func() {
+		evaluateConcurrently(t, engine, source, data, concurrency, "")
+	})
+	t.Logf("%d evaluaciones a la vez, arbol nuevo en cada una: %s", concurrency, rebuilding)
+
+	// Warm up the cache so the measurement is of the reuse and not of the first build
+	if _, err := engine.Evaluate(source, withVersion(contextCopy(data), "v1")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	reusing := measure(func() {
+		evaluateConcurrently(t, engine, source, data, concurrency, "v1")
+	})
+	t.Logf("%d evaluaciones a la vez, arbol reutilizado: %s", concurrency, reusing)
+
+	if reusing.peakAllocated*4 > rebuilding.peakAllocated {
+		t.Errorf("reusing the tree saved less than expected: %s against %s",
+			megabytes(reusing.peakAllocated), megabytes(rebuilding.peakAllocated))
+	}
+}
+
 // TestHTTPRouteCrossCheckMemoryAtScale reproduces the expensive case: crossing thousands of
 // routes to find duplicates, which is what the routes sample does
 func TestHTTPRouteCrossCheckMemoryAtScale(t *testing.T) {
@@ -382,6 +320,7 @@ func TestHTTPRouteCrossCheckMemoryAtScale(t *testing.T) {
 	}
 
 	const objects = 12000
+	const concurrency = 8
 
 	engine := New()
 
@@ -413,7 +352,7 @@ def path_conflict_exists(incoming_route, existing_route):
 
 def compute_raw_match():
     incoming_route = object
-    existing_routes = sources["0"]
+    existing_routes = sources[0]
 
     incoming_name = incoming_route["metadata"]["name"]
     incoming_namespace = incoming_route["metadata"]["namespace"]
@@ -441,18 +380,16 @@ compute_raw_match()
 `
 
 	data := httpRoutes(objects)
-
 	t.Logf("corpus de %d HTTPRoutes: %s en Go", objects, megabytes(liveHeap()))
 
-	// --- tree built on every evaluation, which is what the engine does today
-	perEvaluation := measure(func() {
-		if _, err := engine.Evaluate(source, data); err != nil {
+	single := measure(func() {
+		if _, err := engine.Evaluate(source, contextCopy(data)); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
-	t.Logf("una evaluacion, arbol nuevo: %s", perEvaluation)
+	t.Logf("una evaluacion, arbol nuevo: %s", single)
 
-	// --- tree build through JSON, for comparison with what the engine did before
+	// What the engine did before the direct conversion, for reference
 	values := data.ToMap()
 	var throughJSON []starlark.Value
 	jsonConversion := measure(func() {
@@ -464,74 +401,61 @@ compute_raw_match()
 			}
 			throughJSON = append(throughJSON, converted)
 		}
-		for _, value := range throughJSON {
-			value.Freeze()
-		}
 	})
 	runtime.KeepAlive(throughJSON)
 	throughJSON = nil
 	t.Logf("solo construir el arbol por json: %s", jsonConversion)
 
-	// --- tree built once and shared by several concurrent evaluations
-	predeclared, err := predeclaredValues(values)
-	if err != nil {
+	// Warm up the cache, then measure one evaluation reusing the tree
+	if _, err := engine.Evaluate(source, withVersion(contextCopy(data), "routes-v1")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	program, err := engine.programs.get(source, contextKeys(values), sortedNames(predeclared))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	shared := measure(func() {
-		thread := &starlark.Thread{Name: "template", Print: func(_ *starlark.Thread, _ string) {}}
-		if _, err := program.Init(thread, forEvaluation(predeclared)); err != nil {
+	reused := measure(func() {
+		if _, err := engine.Evaluate(source, withVersion(contextCopy(data), "routes-v1")); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
-	t.Logf("una evaluacion, arbol compartido: %s", shared)
+	t.Logf("una evaluacion, arbol reutilizado: %s", reused)
 
-	// --- several requests at the same time, which is what turns this into gigabytes
-	const concurrency = 8
-	concurrent := measure(func() {
-		var waitGroup sync.WaitGroup
-		for worker := 0; worker < concurrency; worker++ {
-			waitGroup.Add(1)
-			go func() {
-				defer waitGroup.Done()
-
-				local := *data
-				local.Vars = map[string]any{}
-
-				if _, err := engine.Evaluate(source, &local); err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
-			}()
-		}
-		waitGroup.Wait()
+	rebuilding := measure(func() {
+		evaluateConcurrently(t, engine, source, data, concurrency, "")
 	})
-	t.Logf("%d evaluaciones a la vez, arbol nuevo en cada una: %s", concurrency, concurrent)
+	t.Logf("%d evaluaciones a la vez, arbol nuevo en cada una: %s", concurrency, rebuilding)
 
-	concurrentShared := measure(func() {
-		var waitGroup sync.WaitGroup
-		for worker := 0; worker < concurrency; worker++ {
-			waitGroup.Add(1)
-			go func() {
-				defer waitGroup.Done()
-				thread := &starlark.Thread{Name: "template", Print: func(_ *starlark.Thread, _ string) {}}
-				if _, err := program.Init(thread, forEvaluation(predeclared)); err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
-			}()
-		}
-		waitGroup.Wait()
+	reusing := measure(func() {
+		evaluateConcurrently(t, engine, source, data, concurrency, "routes-v1")
 	})
-	t.Logf("%d evaluaciones a la vez, arbol compartido: %s", concurrency, concurrentShared)
+	t.Logf("%d evaluaciones a la vez, arbol reutilizado: %s", concurrency, reusing)
 
-	if shared.peakAllocated*4 > perEvaluation.peakAllocated {
-		t.Errorf("sharing the tree saved less than expected: %s against %s",
-			megabytes(shared.peakAllocated), megabytes(perEvaluation.peakAllocated))
+	if reusing.peakAllocated*4 > rebuilding.peakAllocated {
+		t.Errorf("reusing the tree saved less than expected: %s against %s",
+			megabytes(reusing.peakAllocated), megabytes(rebuilding.peakAllocated))
 	}
+}
 
-	runtime.KeepAlive(predeclared)
+func withVersion(data *template.InjectedData, version string) *template.InjectedData {
+	data.SourcesVersion = version
+
+	return data
+}
+
+func evaluateConcurrently(t *testing.T, engine *Engine, source string, data *template.InjectedData, concurrency int, version string) {
+	t.Helper()
+
+	var waitGroup sync.WaitGroup
+	for worker := 0; worker < concurrency; worker++ {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+
+			local := contextCopy(data)
+			local.SourcesVersion = version
+
+			if _, err := engine.Evaluate(source, local); err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		}()
+	}
+	waitGroup.Wait()
 }

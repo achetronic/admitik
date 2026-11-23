@@ -19,9 +19,12 @@ package common
 import (
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
+	"strings"
 
 	//
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -32,6 +35,19 @@ import (
 	"github.com/freepik-company/admitik/internal/registry/sources"
 	"github.com/freepik-company/admitik/internal/template"
 )
+
+// versionOf returns a short identifier for the injected sources, empty when there are none
+func versionOf(parts []string) string {
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	digest := fnv.New64a()
+	_, _ = digest.Write([]byte(strings.Join(parts, "|")))
+
+	return strconv.FormatUint(digest.Sum64(), 16)
+}
 
 // FetchPolicySources TODO
 func FetchPolicySources[T policystore.PolicyResourceI](
@@ -45,6 +61,10 @@ func FetchPolicySources[T policystore.PolicyResourceI](
 
 	results = make(map[int][]map[string]any)
 
+	// The version describes what is going to be injected, so engines can reuse work between
+	// requests: it changes when the cache changes or when a filter resolves to something else
+	versionParts := make([]string, 0, len(policy.GetSources()))
+
 	for sourceIndex, sourceItem := range policy.GetSources() {
 
 		gvr := schema.GroupVersionResource{
@@ -52,7 +72,7 @@ func FetchPolicySources[T policystore.PolicyResourceI](
 			Version:  sourceItem.Version,
 			Resource: sourceItem.Resource}
 
-		allResources := sourcesReg.GetResources(gvr)
+		snapshot := sourcesReg.Snapshot(gvr)
 
 		// Deep copy to avoid mutating the original policy (full of pointers, dude)
 		sourceItemCopy := sourceItem.DeepCopy()
@@ -64,8 +84,11 @@ func FetchPolicySources[T policystore.PolicyResourceI](
 			continue
 		}
 
+		versionParts = append(versionParts, fmt.Sprintf("%d:%s@%d:%v",
+			sourceIndex, GvrString(gvr), snapshot.Version, sourceItemCopy.Filters))
+
 		// Filter resources
-		filtered, localErr := filterResources(allResources, sourceItemCopy.Filters)
+		filtered, localErr := filterResources(snapshot.Objects, sourceItemCopy.Filters)
 		if localErr != nil {
 			tmpErrors = append(tmpErrors, fmt.Errorf("failed to filter resources for GVR '%v': %v", GvrString(gvr), localErr))
 			results[sourceIndex] = []map[string]any{}
@@ -76,6 +99,8 @@ func FetchPolicySources[T policystore.PolicyResourceI](
 			results[sourceIndex] = append(results[sourceIndex], *resource)
 		}
 	}
+
+	injectedData.SourcesVersion = versionOf(versionParts)
 
 	return results, errors.Join(tmpErrors...)
 }

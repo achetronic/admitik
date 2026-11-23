@@ -19,8 +19,11 @@ package sources
 import (
 	"sync"
 
-	"github.com/freepik-company/admitik/internal/informer"
+	//
 	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	//
+	"github.com/freepik-company/admitik/internal/informer"
 )
 
 // SourcesRegistry manage sources watchers' lifecycle
@@ -28,4 +31,15 @@ type SourcesRegistry struct {
 	mu sync.RWMutex
 
 	informers map[schema.GroupVersionResource]*informer.Informer
+
+	// versions is increased every time an informer reports a change, so callers can tell
+	// whether the cached objects of a resource are the same ones they saw before
+	versions map[schema.GroupVersionResource]uint64
+}
+
+// Snapshot is the cached content of a resource type at a given version.
+// Two snapshots with the same version hold the same objects
+type Snapshot struct {
+	Objects []*map[string]any
+	Version uint64
 }

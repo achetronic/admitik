@@ -107,38 +107,6 @@ var modules = sync.OnceValues(func() (starlark.StringDict, error) {
 	}, nil
 })
 
-// predeclaredValues builds the values a script can see, prefixed so the program can bind them
-// to their plain names before running the user code
-func predeclaredValues(values map[string]any) (starlark.StringDict, error) {
-
-	loadedModules, err := modules()
-	if err != nil {
-		return nil, err
-	}
-
-	predeclared := make(starlark.StringDict, len(values)+len(loadedModules))
-
-	for key, value := range values {
-		converted, err := toStarlark(value)
-		if err != nil {
-			return nil, fmt.Errorf("failed converting '%s' into Starlark: %w", key, err)
-		}
-
-		// 'vars' is the only value the script is allowed to modify
-		if key != "vars" {
-			converted.Freeze()
-		}
-
-		predeclared["__raw_"+key] = converted
-	}
-
-	for name, module := range loadedModules {
-		predeclared[name] = module
-	}
-
-	return predeclared, nil
-}
-
 // sortedNames returns the predeclared names sorted, so they can be used as a cache key
 func sortedNames(predeclared starlark.StringDict) []string {
 

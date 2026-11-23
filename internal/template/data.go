@@ -36,6 +36,11 @@ type InjectedData struct {
 
 	// Vars holds values computed by the user inside a template. Engines may read and write it
 	Vars map[string]any
+
+	// SourcesVersion identifies the content of Sources. When two contexts share it, they hold
+	// the same objects, so engines may reuse whatever they derived from them.
+	// An empty value means the content cannot be reused
+	SourcesVersion string
 }
 
 func NewInjectedData() *InjectedData {
