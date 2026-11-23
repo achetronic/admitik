@@ -17,6 +17,7 @@ package observedresource
 
 import (
 	"fmt"
+
 	"gopkg.in/yaml.v3"
 
 	//

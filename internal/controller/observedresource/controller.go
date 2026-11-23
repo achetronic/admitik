@@ -19,11 +19,11 @@ package observedresource
 import (
 	"context"
 	"fmt"
-	"golang.org/x/exp/maps"
-	coreLog "log"
 	"slices"
 	"strings"
 	"time"
+
+	"golang.org/x/exp/maps"
 
 	//
 	corev1 "k8s.io/api/core/v1"
@@ -110,14 +110,6 @@ func (r *ObservedResourceController) NeedLeaderElection() bool {
 	return true
 }
 
-func (r *ObservedResourceController) pepeWorker() {
-	pasanCosas := r.Dependencies.ClusterGenerationPolicyRegistry.Broadcaster.Subscribe(100)
-
-	for elem := range pasanCosas {
-		coreLog.Print("Aquí dando una vueltita: ", elem.Object.Name, elem.Type)
-	}
-}
-
 // getResourcesFromPolicyRegistries returns a list of observers for each type of resource that is required to be watched
 // Example: map[resourceType][]Observers
 // TODO: Improve docs
@@ -180,9 +172,6 @@ func (r *ObservedResourceController) Start(ctx context.Context) error {
 
 	// Start cleaner for dead informers
 	go r.informersCleanerWorker()
-
-	// TODO: test
-	go r.pepeWorker()
 
 	// Keep your controller alive
 	for {

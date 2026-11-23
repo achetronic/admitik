@@ -17,9 +17,10 @@ limitations under the License.
 package observedresource
 
 import (
+	"strings"
+
 	"github.com/freepik-company/admitik/internal/globals"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"strings"
 )
 
 // GVKR represents TODO
