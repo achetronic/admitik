@@ -31,6 +31,7 @@ import (
 	"github.com/freepik-company/admitik/api/v1alpha1"
 	"github.com/freepik-company/admitik/internal/informer"
 	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
+	"github.com/freepik-company/admitik/internal/telemetry"
 	"github.com/freepik-company/admitik/internal/template"
 )
 
@@ -55,6 +56,9 @@ type AdmissionServerDependencies struct {
 
 	// Engines renders the conditions, patches and messages of the policies
 	Engines *template.Registry
+
+	// Metrics records what the policies decide. It can be nil
+	Metrics *telemetry.Recorder
 }
 
 // AdmissionServerOptions represents available options that can be passed

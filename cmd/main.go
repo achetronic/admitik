@@ -57,6 +57,7 @@ import (
 	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
 	resourceObserverRegistry "github.com/freepik-company/admitik/internal/registry/resourceobserver"
 	"github.com/freepik-company/admitik/internal/server/admission"
+	"github.com/freepik-company/admitik/internal/telemetry"
 	"github.com/freepik-company/admitik/internal/template"
 	"github.com/freepik-company/admitik/internal/template/cel"
 	"github.com/freepik-company/admitik/internal/template/gotmpl"
@@ -370,6 +371,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Metrics about what the policies decide. They are served by the metrics endpoint
+	telemetryRecorder := telemetry.NewRecorder()
+
 	// Create registries managers that will be used by several controllers
 	clusterValidationPolicyReg := policyStore.NewPolicyStore[*v1alpha1.ClusterValidationPolicy]()
 	clusterMutationPolicyReg := policyStore.NewPolicyStore[*v1alpha1.ClusterMutationPolicy]()
@@ -531,6 +535,7 @@ func main() {
 			ClusterMutationPolicyRegistry:   clusterMutationPolicyReg,
 			Pool:                            informersPool,
 			Engines:                         engines,
+			Metrics:                         telemetryRecorder,
 		})
 	if err = mgr.Add(admissionServer); err != nil {
 		setupLog.Error(err, "failed adding admission server controller to manager")

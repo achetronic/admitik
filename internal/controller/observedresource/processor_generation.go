@@ -223,7 +223,7 @@ func (p *GenerationProcessor) Process(resourceType string, eventType watch.Event
 		continue
 
 	createKubeEvent:
-		err = common.CreateKubeEvent(globals.Application.Context, "default", "resources-controller",
+		err = common.CreateKubeEvent(globals.Application.Context, common.EventNamespace(object[0]), "resources-controller",
 			object[0], *policyObj, kubeEventAction, kubeEventMessage)
 		if err != nil {
 			logger.Info(fmt.Sprintf("failed creating Kubernetes event: %s", err.Error()))

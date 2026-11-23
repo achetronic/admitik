@@ -100,3 +100,20 @@ func CreateKubeEvent(ctx context.Context, namespace string, reporter string, obj
 
 	return err
 }
+
+// EventNamespace returns the namespace where an event about the object has to be created.
+// Cluster scoped objects have no namespace, and their events go to the default one
+func EventNamespace(object map[string]any) string {
+
+	metadata, isMap := object["metadata"].(map[string]any)
+	if !isMap {
+		return "default"
+	}
+
+	namespace, _ := metadata["namespace"].(string)
+	if namespace == "" {
+		return "default"
+	}
+
+	return namespace
+}

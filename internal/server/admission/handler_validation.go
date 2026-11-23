@@ -22,6 +22,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	//
 	admissionv1 "k8s.io/api/admission/v1"
@@ -31,6 +32,7 @@ import (
 	//
 	"github.com/freepik-company/admitik/api/v1alpha1"
 	"github.com/freepik-company/admitik/internal/common"
+	"github.com/freepik-company/admitik/internal/telemetry"
 	"github.com/freepik-company/admitik/internal/template"
 )
 
@@ -117,66 +119,124 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 	caPolicyList := s.dependencies.ClusterValidationPolicyRegistry.Store.GetResources(resourcePattern)
 	for _, caPolicyObj := range caPolicyList {
 
-		// Assume rejection for each policy individually
-		reviewResponse.Response.Allowed = false
-
 		// Automatically add some information to the logs
-		logger = logger.WithValues("ClusterValidationPolicy", caPolicyObj.Name)
+		policyLogger := logger.WithValues("ClusterValidationPolicy", caPolicyObj.Name)
+		started := time.Now()
 
 		// Retrieve the sources declared per policy
-		tmpFetchedPolicySources, fetchErr := common.FetchPolicySources(s.dependencies.Engines, s.dependencies.Pool, caPolicyObj, commonTemplateInjectedObject)
+		fetchedSources, fetchErr := common.FetchPolicySources(s.dependencies.Engines, s.dependencies.Pool, caPolicyObj, commonTemplateInjectedObject)
 		if fetchErr != nil {
-			logger.Info("failed fetching sources. Broken ones will be empty", "error", fetchErr.Error())
+			policyLogger.Info("failed fetching sources. Broken ones will be empty", "error", fetchErr.Error())
 		}
 
 		specificTemplateInjectedObject := *commonTemplateInjectedObject
-		specificTemplateInjectedObject.Sources = tmpFetchedPolicySources
+		specificTemplateInjectedObject.Sources = fetchedSources
 
-		// Evaluate template conditions
-		conditionsPassed, condErr := common.IsPassingConditions(s.dependencies.Engines, caPolicyObj.Spec.Conditions, &specificTemplateInjectedObject)
-		if condErr != nil {
-			logger.Info(fmt.Sprintf("failed evaluating conditions: %s", condErr.Error()))
+		result := s.validateWith(caPolicyObj, &specificTemplateInjectedObject)
+		if fetchErr != nil {
+			result.Warning = fmt.Sprintf(
+				"admitik: policy '%s' could not read its sources, so it was evaluated with the objects available",
+				caPolicyObj.Name)
+			result.Reason = telemetry.ReasonSources
 		}
 
-		// Conditions are met, skip rejection
-		if conditionsPassed {
+		s.dependencies.Metrics.Evaluation(telemetry.KindValidate, caPolicyObj.Name,
+			time.Since(started), countSourceObjects(fetchedSources))
+		s.dependencies.Metrics.Decision(telemetry.Decision{
+			Kind:      telemetry.KindValidate,
+			Policy:    caPolicyObj.Name,
+			Operation: string(requestObj.Request.Operation),
+			Resource:  resourceID(requestObj.Request.Resource),
+			Outcome:   result.Outcome,
+			Reason:    result.Reason,
+		})
+
+		if result.Warning != "" {
+			policyLogger.Info(result.Warning)
+			addWarning(reviewResponse.Response, result.Warning)
+		}
+
+		// Conditions are met, this policy does not reject the object
+		if !result.Denied {
 			continue
 		}
 
-		// When some condition is not met, evaluate message's template and emit a response
-		var parsedMessage string
-		parsedMessage, err = s.dependencies.Engines.Evaluate(caPolicyObj.Spec.Message.Engine, caPolicyObj.Spec.Message.Template, &specificTemplateInjectedObject)
-		if err != nil {
-			logger.Info(fmt.Sprintf("failed parsing message template: %s", err.Error()))
-			parsedMessage = "Reason unavailable: message template failed. More info in controller logs."
+		reviewResponse.Response.Allowed = result.Permissive
+		reviewResponse.Response.Result.Message = result.Message
+
+		if result.Permissive {
+			addWarning(reviewResponse.Response, fmt.Sprintf(
+				"admitik: policy '%s' is in permissive mode, this object violates it", caPolicyObj.Name))
+			policyLogger.Info(fmt.Sprintf("object accepted with unmet conditions: %s", result.Message))
+			continue
 		}
 
-		reviewResponse.Response.Result.Message = parsedMessage
-
-		// When the policy is in Permissive mode, allow it anyway
-		var kubeEventAction string
-		if strings.ToLower(caPolicyObj.Spec.FailureAction) == v1alpha1.ValidationFailureActionPermissive {
-			reviewResponse.Response.Allowed = true
-			kubeEventAction = "AllowedWithViolations"
-			logger.Info(fmt.Sprintf("object accepted with unmet conditions: %s", parsedMessage))
-		} else {
-			kubeEventAction = "Rejected"
-			logger.Info(fmt.Sprintf("object rejected due to unmet conditions: %s", parsedMessage))
-		}
-
-		// Create the Event in Kubernetes about involved object
-		err = common.CreateKubeEvent(request.Context(), "default", "admission-server",
-			commonTemplateInjectedObject.Object, *caPolicyObj, kubeEventAction, parsedMessage)
-		if err != nil {
-			logger.Info(fmt.Sprintf("failed creating Kubernetes event: %s", err.Error()))
-		}
-
-		// On conditions not being met, first required policy causes early full rejection
-		if strings.ToLower(caPolicyObj.Spec.FailureAction) == v1alpha1.ValidationFailureActionEnforce {
-			return
-		}
+		policyLogger.Info(fmt.Sprintf("object rejected due to unmet conditions: %s", result.Message))
+		return
 	}
 
 	reviewResponse.Response.Allowed = true
 	reviewResponse.Response.Result = &metav1.Status{}
+}
+
+// validationResult is what one policy decided about the object
+type validationResult struct {
+	// Denied is whether the policy rejects the object
+	Denied bool
+
+	// Permissive is whether the policy only reports the violation
+	Permissive bool
+
+	// Message is the reason shown to the user
+	Message string
+
+	Outcome telemetry.Outcome
+	Reason  telemetry.Reason
+
+	// Warning is a message for the user, empty when there is nothing to say
+	Warning string
+}
+
+// validateWith evaluates the conditions and the message of one policy over the object
+func (s *HttpServer) validateWith(
+	policy *v1alpha1.ClusterValidationPolicy,
+	data *template.InjectedData,
+) validationResult {
+
+	permissive := strings.ToLower(policy.Spec.FailureAction) == v1alpha1.ValidationFailureActionPermissive
+
+	conditionsPassed, condErr := common.IsPassingConditions(s.dependencies.Engines, policy.Spec.Conditions, data)
+
+	result := validationResult{}
+	if condErr != nil {
+		result.Warning = fmt.Sprintf("admitik: policy '%s' could not evaluate its conditions", policy.Name)
+		result.Reason = telemetry.ReasonConditions
+	}
+
+	if conditionsPassed {
+		result.Outcome = telemetry.OutcomeAllowed
+		return result
+	}
+
+	// A policy that cannot be evaluated rejects the object, unless it is in permissive mode
+	result.Denied = true
+	result.Permissive = permissive
+	result.Outcome = telemetry.OutcomeDenied
+	if permissive {
+		result.Outcome = telemetry.OutcomePermissive
+	}
+	if condErr != nil {
+		result.Outcome = telemetry.OutcomeFailed
+	}
+
+	message, err := s.dependencies.Engines.Evaluate(policy.Spec.Message.Engine, policy.Spec.Message.Template, data)
+	if err != nil {
+		result.Message = "Reason unavailable: message template failed. More info in controller logs."
+		result.Warning = fmt.Sprintf("admitik: policy '%s' could not render its message", policy.Name)
+		result.Reason = telemetry.ReasonTemplate
+		return result
+	}
+
+	result.Message = message
+	return result
 }
