@@ -17,11 +17,13 @@ limitations under the License.
 package sources
 
 import (
-	"github.com/freepik-company/admitik/internal/informer"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	//
+	"github.com/freepik-company/admitik/internal/informer"
 )
 
-// NewSourcesRegistry TODO
+// NewSourcesRegistry creates a registry of informers, one per watched GVR
 func NewSourcesRegistry() *SourcesRegistry {
 
 	return &SourcesRegistry{
@@ -29,22 +31,17 @@ func NewSourcesRegistry() *SourcesRegistry {
 	}
 }
 
-// InformerIsRegistered TODO
+// InformerIsRegistered returns whether an informer exists for the provided GVR
 func (m *SourcesRegistry) InformerIsRegistered(gvr schema.GroupVersionResource) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	_, informerExists := m.informers[gvr]
-	if !informerExists {
-		return false
-	}
-
-	return true
+	return informerExists
 }
 
-// RegisterInformer registers an informer for required GVR.
-// Registering the informer just creates a placeholder for it: actual creation and launching will be done
-// by the controller using this registry
+// RegisterInformer stores an already built informer for the provided GVR.
+// Launching it is up to the controller using this registry
 func (m *SourcesRegistry) RegisterInformer(gvr schema.GroupVersionResource, inf *informer.Informer) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -52,8 +49,7 @@ func (m *SourcesRegistry) RegisterInformer(gvr schema.GroupVersionResource, inf 
 	m.informers[gvr] = inf
 }
 
-// DestroyInformer send a signal to the informer to stop
-// and delete it from the registry
+// DestroyInformer sends a signal to the informer to stop and deletes it from the registry
 func (m *SourcesRegistry) DestroyInformer(gvr schema.GroupVersionResource) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -63,22 +59,22 @@ func (m *SourcesRegistry) DestroyInformer(gvr schema.GroupVersionResource) {
 		return
 	}
 
-	// Just being explicit, dude
-	if informerExists && informerObject != nil {
-		m.informers[gvr].Stop()
+	if informerObject != nil {
+		informerObject.Stop()
 	}
 
-	// Delete informer from registry
 	delete(m.informers, gvr)
 }
 
+// GetInformer returns the informer registered for the provided GVR, or nil when there is none
 func (m *SourcesRegistry) GetInformer(gvr schema.GroupVersionResource) *informer.Informer {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	if !m.InformerIsRegistered(gvr) {
+	informerObject, informerExists := m.informers[gvr]
+	if !informerExists {
 		return nil
 	}
 
-	return m.informers[gvr]
+	return informerObject
 }

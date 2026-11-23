@@ -17,9 +17,10 @@ limitations under the License.
 package sources
 
 import (
+	"sync"
+
 	"github.com/freepik-company/admitik/internal/informer"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"sync"
 )
 
 // SourcesRegistry manage sources watchers' lifecycle

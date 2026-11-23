@@ -18,9 +18,8 @@ package informer
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/dynamic"
 	"sync"
 	"time"
 
@@ -29,6 +28,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/tools/cache"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -36,22 +37,27 @@ import (
 
 const (
 	defaultResyncPeriod = 10 * time.Minute
-	cacheWaitTimeout    = 30 * time.Second
 
 	//
 	informerStartedMessage         = "Informer has been started"
-	informerStoppedMessage         = "Informer has been stoped"
+	informerStoppedMessage         = "Informer has been stopped"
 	informerContextFinishedMessage = "Informer finished by context"
 	informerKilledMessage          = "Informer killed by StopSignal"
 )
 
+// EventHandlerFunc is the signature of the functions called for every event received by an informer
 type EventHandlerFunc = func(eventType watch.EventType, obj *unstructured.Unstructured, oldObj *unstructured.Unstructured) error
 
+// Options configures an informer
 type Options struct {
-	//
-	GVR       schema.GroupVersionResource
+	// GVR of the watched resource
+	GVR schema.GroupVersionResource
+
+	// Namespace to watch. Empty means all namespaces
 	Namespace string
 
+	// InformerDurationToResync is the interval used by the informer to resync its cache.
+	// Defaults to 10 minutes when zero
 	InformerDurationToResync time.Duration
 
 	// Optional: additional filters
@@ -59,11 +65,13 @@ type Options struct {
 	FieldSelector string
 }
 
+// Dependencies are the external collaborators an informer needs
 type Dependencies struct {
 	Context *context.Context
-	Client  *dynamic.DynamicClient
+	Client  dynamic.Interface
 }
 
+// Informer wraps a client-go shared informer, caching the objects of a single GVR
 type Informer struct {
 	mu sync.RWMutex
 
@@ -74,6 +82,7 @@ type Informer struct {
 	//
 	rawInformer cache.SharedIndexInformer
 	stopChan    chan struct{}
+	stopOnce    sync.Once
 
 	//
 	started bool
@@ -82,11 +91,11 @@ type Informer struct {
 func NewInformer(opts Options, deps Dependencies) (*Informer, error) {
 
 	if deps.Client == nil {
-		return nil, fmt.Errorf("kube client cannot be nil")
+		return nil, errors.New("kube client cannot be nil")
 	}
 
 	if deps.Context == nil {
-		return nil, fmt.Errorf("context cannot be nil")
+		return nil, errors.New("context cannot be nil")
 	}
 
 	if opts.InformerDurationToResync == 0 {
@@ -126,7 +135,6 @@ func (r *Informer) createInformer() {
 		}
 	}
 
-	// Define our informer TODO
 	factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(
 		r.dependencies.Client,
 		r.options.InformerDurationToResync,
@@ -136,29 +144,32 @@ func (r *Informer) createInformer() {
 	r.rawInformer = factory.ForResource(r.options.GVR).Informer()
 }
 
+// WithEventHandlerFunc registers the function called for every add/update/delete event.
+// It must be used before calling Start
 func (r *Informer) WithEventHandlerFunc(evHandlerFunc EventHandlerFunc) error {
 
-	logger := log.FromContext(*r.dependencies.Context).
-		WithValues("gvr", r.options.GVR, "namespace", r.options.Namespace)
-
-	//
 	r.mu.RLock()
-	if r.started {
-		return fmt.Errorf("cannot add event handler after informer has started")
-	}
+	started := r.started
 	r.mu.RUnlock()
+
+	if started {
+		return errors.New("cannot add event handler after informer has started")
+	}
+
+	baseLogger := log.FromContext(*r.dependencies.Context).
+		WithValues("gvr", r.options.GVR, "namespace", r.options.Namespace)
 
 	// Register functions to handle different types of events
 	handlers := cache.ResourceEventHandlerFuncs{
 
 		//
 		AddFunc: func(eventObject interface{}) {
-			obj := eventObject.(*unstructured.Unstructured)
+			obj, isUnstructured := eventObject.(*unstructured.Unstructured)
+			if !isUnstructured {
+				return
+			}
 
-			logger = logger.WithValues(
-				"eventType", watch.Added,
-				"object", obj.GetName(),
-			)
+			logger := baseLogger.WithValues("eventType", watch.Added, "object", obj.GetName())
 			logger.V(1).Info("Processing reconciliation")
 
 			if err := evHandlerFunc(watch.Added, obj, nil); err != nil {
@@ -168,10 +179,17 @@ func (r *Informer) WithEventHandlerFunc(evHandlerFunc EventHandlerFunc) error {
 
 		//
 		UpdateFunc: func(eventObjectOld, eventObject interface{}) {
-			obj := eventObject.(*unstructured.Unstructured)
-			oldObj := eventObjectOld.(*unstructured.Unstructured)
+			obj, isUnstructured := eventObject.(*unstructured.Unstructured)
+			if !isUnstructured {
+				return
+			}
 
-			logger = logger.WithValues(
+			oldObj, isUnstructured := eventObjectOld.(*unstructured.Unstructured)
+			if !isUnstructured {
+				return
+			}
+
+			logger := baseLogger.WithValues(
 				"eventType", watch.Modified,
 				"object", obj.GetName(),
 				"oldObject", oldObj.GetName(),
@@ -185,12 +203,12 @@ func (r *Informer) WithEventHandlerFunc(evHandlerFunc EventHandlerFunc) error {
 
 		//
 		DeleteFunc: func(eventObject interface{}) {
-			obj := eventObject.(*unstructured.Unstructured)
+			obj, isUnstructured := eventObject.(*unstructured.Unstructured)
+			if !isUnstructured {
+				return
+			}
 
-			logger = logger.WithValues(
-				"eventType", watch.Deleted,
-				"object", obj.GetName(),
-			)
+			logger := baseLogger.WithValues("eventType", watch.Deleted, "object", obj.GetName())
 			logger.V(1).Info("Processing reconciliation")
 
 			if err := evHandlerFunc(watch.Deleted, obj, nil); err != nil {
@@ -207,18 +225,18 @@ func (r *Informer) WithEventHandlerFunc(evHandlerFunc EventHandlerFunc) error {
 	return nil
 }
 
-// TODO: Make this stop reliable and thread-safe
+// Stop signals the informer to finish. It is safe to call it more than once
 func (r *Informer) Stop() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	close(r.stopChan)
+	r.stopOnce.Do(func() {
+		close(r.stopChan)
+	})
 }
 
 func (r *Informer) Start() {
 	//
 	r.mu.Lock()
 	if r.started {
+		r.mu.Unlock()
 		return
 	}
 	r.started = true
@@ -248,6 +266,7 @@ func (r *Informer) Start() {
 	}()
 }
 
+// IsStarted returns whether the informer has been launched or not
 func (r *Informer) IsStarted() bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -255,10 +274,12 @@ func (r *Informer) IsStarted() bool {
 	return r.started
 }
 
+// GetStore returns the cache store holding the watched objects
 func (r *Informer) GetStore() cache.Store {
 	return r.rawInformer.GetStore()
 }
 
+// GetIndexer returns the cache indexer holding the watched objects
 func (r *Informer) GetIndexer() cache.Indexer {
 	return r.rawInformer.GetIndexer()
 }

@@ -22,19 +22,19 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-// GetRegisteredResourceTypes returns TODO
+// GetRegisteredResourceTypes returns the GVRs currently being watched
 func (m *SourcesRegistry) GetRegisteredResourceTypes() []schema.GroupVersionResource {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	return maps.Keys(m.informers)
 }
 
-// GetResources return all the objects of provided type
+// GetResources returns all the cached objects of the provided type.
 // Returning pointers to increase performance during templating stage with huge lists
 func (m *SourcesRegistry) GetResources(gvr schema.GroupVersionResource) (results []*map[string]any) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	//
 	informer, informerFound := m.informers[gvr]
