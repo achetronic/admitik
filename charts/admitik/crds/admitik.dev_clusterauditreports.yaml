@@ -1,0 +1,142 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.15.0
+  name: clusterauditreports.admitik.dev
+spec:
+  group: admitik.dev
+  names:
+    kind: ClusterAuditReport
+    listKind: ClusterAuditReportList
+    plural: clusterauditreports
+    singular: clusterauditreport
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.scanTime
+      name: Scan
+      type: date
+    - jsonPath: .status.summary.scanned
+      name: Scanned
+      type: integer
+    - jsonPath: .status.summary.nonCompliant
+      name: NonCompliant
+      type: integer
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ClusterAuditReport is the result of evaluating the validation policies over the objects that
+          already exist in the cluster. Objects are evaluated with the CREATE operation, as a recreation
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          status:
+            description: ClusterAuditReportStatus is the result of the last compliance scan
+            properties:
+              duration:
+                description: Duration is how long the scan took, as a human readable
+                  value
+                type: string
+              results:
+                description: Results holds one entry per policy and resource type
+                items:
+                  description: AuditResult is the result of one policy over one resource
+                    type
+                  properties:
+                    compliant:
+                      description: Compliant is the number of objects that met the
+                        conditions
+                      type: integer
+                    errors:
+                      description: Errors is the number of objects that could not be
+                        evaluated
+                      type: integer
+                    kind:
+                      description: Kind is the kind of the policy
+                      type: string
+                    nonCompliant:
+                      description: NonCompliant is the number of objects that did not
+                        meet the conditions
+                      type: integer
+                    policy:
+                      description: Policy is the name of the policy that was evaluated
+                      type: string
+                    resource:
+                      description: Resource identifies the resource type, as {group}/{version}/{resource}
+                      type: string
+                    samples:
+                      description: Samples holds a few non compliant objects, as namespace/name
+                      items:
+                        type: string
+                      type: array
+                    scanned:
+                      description: Scanned is the number of objects the policy was
+                        evaluated against
+                      type: integer
+                  required:
+                  - compliant
+                  - errors
+                  - kind
+                  - nonCompliant
+                  - policy
+                  - resource
+                  - scanned
+                  type: object
+                type: array
+              scanTime:
+                description: ScanTime is when the scan started
+                format: date-time
+                type: string
+              summary:
+                description: AuditSummary aggregates the results of a scan
+                properties:
+                  compliant:
+                    description: Compliant is the number of objects that met the conditions
+                      of every policy
+                    type: integer
+                  errors:
+                    description: Errors is the number of objects that could not be
+                      evaluated
+                    type: integer
+                  nonCompliant:
+                    description: NonCompliant is the number of objects that did not
+                      meet the conditions of some policy
+                    type: integer
+                  policies:
+                    description: Policies is the number of policies that were evaluated
+                    type: integer
+                  scanned:
+                    description: Scanned is the number of objects that were looked
+                      at
+                    type: integer
+                required:
+                - compliant
+                - errors
+                - nonCompliant
+                - policies
+                - scanned
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

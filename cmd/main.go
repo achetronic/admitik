@@ -45,6 +45,7 @@ import (
 
 	//
 	"github.com/freepik-company/admitik/api/v1alpha1"
+	"github.com/freepik-company/admitik/internal/audit"
 	"github.com/freepik-company/admitik/internal/certificates"
 	"github.com/freepik-company/admitik/internal/controller"
 	"github.com/freepik-company/admitik/internal/controller/clustergenerationpolicy"
@@ -110,6 +111,8 @@ func main() {
 	var excludeAdmissionSelfNamespace bool
 	var excludedAdmissionNamespaces string
 
+	var auditInterval time.Duration
+
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metric endpoint binds to. "+
 		"Use the port :8080. If not set, it will be 0 in order to disable the metrics server")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -160,6 +163,9 @@ func main() {
 		"Exclude Admitik resources from admission evaluations")
 	flag.StringVar(&excludedAdmissionNamespaces, "excluded-admission-namespaces", "",
 		"Comma-separated list of namespaces to be excluded from admission evaluations. Commonly used for 'kube-system'")
+
+	flag.DurationVar(&auditInterval, "audit-interval", 0,
+		"Interval between compliance scans over the objects that already exist. Zero disables them")
 
 	// Ref: https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/log/zap@v0.21.0#Options.BindFlags
 	opts := zap.Options{
@@ -540,6 +546,22 @@ func main() {
 	if err = mgr.Add(admissionServer); err != nil {
 		setupLog.Error(err, "failed adding admission server controller to manager")
 		os.Exit(1)
+	}
+
+	// Init the compliance scans. They evaluate the validation policies over the existing objects
+	// and write one aggregated report. Disabled when the interval is zero
+	if auditInterval > 0 {
+		auditScanner := audit.NewScanner(audit.ScannerOptions{}, audit.ScannerDependencies{
+			Client:  mgr.GetClient(),
+			Dynamic: globals.Application.KubeRawClient,
+			Engines: engines,
+			Pool:    informersPool,
+		})
+
+		if err = mgr.Add(audit.Runner{Interval: auditInterval, Scanner: auditScanner}); err != nil {
+			setupLog.Error(err, "failed adding the audit scanner to the manager")
+			os.Exit(1)
+		}
 	}
 
 	//

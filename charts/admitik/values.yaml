@@ -39,6 +39,7 @@ controller:
   - --enable-special-labels
   - --exclude-admission-self-namespace
   - --excluded-admission-namespaces=kube-system
+  - --audit-interval=10m
 
   # Define a list of environment variables used inside the controller
   # Ref: https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/#use-configmap-defined-environment-variables-in-pod-commands
