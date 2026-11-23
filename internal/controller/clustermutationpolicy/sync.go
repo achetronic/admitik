@@ -19,9 +19,10 @@ package clustermutationpolicy
 import (
 	"context"
 	"fmt"
-	"github.com/freepik-company/admitik/internal/pubsub"
 	"slices"
 	"strings"
+
+	"github.com/freepik-company/admitik/internal/pubsub"
 
 	//
 	admissionregv1 "k8s.io/api/admissionregistration/v1"
@@ -114,11 +115,6 @@ func (r *ClusterMutationPolicyReconciler) ReconcileClusterMutationPolicy(ctx con
 				desiredWatchedTypes = append(desiredWatchedTypes, watchedType)
 				r.Dependencies.ClusterMutationPolicyRegistry.Store.AddOrUpdateResource(watchedType, resourceManifest)
 			}
-
-			// Re-sort collection by priority (ascending order)
-			r.Dependencies.ClusterMutationPolicyRegistry.Store.SortCollection(watchedType, func(a, b *v1alpha1.ClusterMutationPolicy) bool {
-				return a.Spec.Priority < b.Spec.Priority
-			})
 		}
 	}
 
@@ -128,6 +124,13 @@ func (r *ClusterMutationPolicyReconciler) ReconcileClusterMutationPolicy(ctx con
 		if !slices.Contains(desiredWatchedTypes, registeredResourceType) {
 			r.Dependencies.ClusterMutationPolicyRegistry.Store.RemoveResource(registeredResourceType, resourceManifest)
 		}
+	}
+
+	// Order each affected collection by priority (ascending order)
+	for _, watchedType := range desiredWatchedTypes {
+		r.Dependencies.ClusterMutationPolicyRegistry.Store.SortCollection(watchedType, func(a, b *v1alpha1.ClusterMutationPolicy) bool {
+			return a.Spec.Priority < b.Spec.Priority
+		})
 	}
 
 	// Craft MutatingWebhookConfiguration rules based on the previous existing one and current pool keys
