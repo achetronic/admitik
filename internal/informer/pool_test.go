@@ -252,3 +252,30 @@ func TestScopeString(t *testing.T) {
 		t.Errorf("got %q, expected %q", got, expected)
 	}
 }
+
+func TestPoolIsSyncedWithoutInformers(t *testing.T) {
+	pool := newTestPool(t)
+
+	if !pool.Synced() {
+		t.Error("an empty pool should be considered synced")
+	}
+}
+
+func TestPoolIsSyncedOnlyWhenEveryInformerHasItsCache(t *testing.T) {
+	pool := newTestPool(t, testObject("existing"))
+	scope := Scope{GVR: poolGVR}
+
+	if _, err := pool.Ensure("consumer-a", scope); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if pool.Synced() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatal("the pool never reported its informers as synced")
+}

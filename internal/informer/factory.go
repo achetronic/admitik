@@ -274,6 +274,15 @@ func (r *Informer) IsStarted() bool {
 	return r.started
 }
 
+// HasSynced reports whether the cache of the informer has been filled at least once
+func (r *Informer) HasSynced() bool {
+	if r.rawInformer == nil {
+		return false
+	}
+
+	return r.rawInformer.HasSynced()
+}
+
 // GetStore returns the cache store holding the watched objects
 func (r *Informer) GetStore() cache.Store {
 	return r.rawInformer.GetStore()

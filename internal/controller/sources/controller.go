@@ -18,9 +18,11 @@ package sources
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	//
@@ -48,6 +50,15 @@ const (
 
 	//
 	controllerContextFinishedMessage = "Controller finished by context"
+
+	// cacheSyncTimeout is how long a replica waits for the informer caches before serving
+	// admission anyway. A source pointing to a resource type that does not exist in the cluster
+	// never syncs, and one broken policy must not take the whole replica out of rotation
+	cacheSyncTimeout = 30 * time.Second
+
+	//
+	readyWaitingForReconcile = "waiting for the first reconciliation of the policies"
+	readyWaitingForCaches    = "waiting for the informer caches"
 )
 
 // SourcesControllerOptions represents available options that can be passed to SourcesController on start
@@ -77,6 +88,33 @@ type SourcesController struct {
 
 	Options      SourcesControllerOptions
 	Dependencies SourcesControllerDependencies
+
+	// carried stuff
+	startedAt  time.Time
+	reconciled atomic.Bool
+	ready      atomic.Bool
+}
+
+// Ready reports whether this replica can already serve admission requests.
+// It waits for the first reconciliation and for the informer caches, because a replica that has
+// not synced would evaluate the policies with empty sources and mutate or validate differently.
+// It is a latch: once the replica is ready, adding a source later does not take it out of rotation
+func (r *SourcesController) Ready() error {
+
+	if r.ready.Load() {
+		return nil
+	}
+
+	if !r.reconciled.Load() {
+		return errors.New(readyWaitingForReconcile)
+	}
+
+	if !r.Dependencies.Pool.Synced() && time.Since(r.startedAt) < cacheSyncTimeout {
+		return errors.New(readyWaitingForCaches)
+	}
+
+	r.ready.Store(true)
+	return nil
 }
 
 // NeedLeaderElection implements manager.LeaderElectionRunnable.
@@ -105,6 +143,8 @@ func (r *SourcesController) Start(ctx context.Context) error {
 	logger := log.FromContext(*r.Dependencies.Context).WithValues("controller", controllerName)
 	logger.Info("Starting Controller")
 
+	r.startedAt = time.Now()
+
 	ticker := time.NewTicker(secondsToReconcileInformersAgain)
 	defer ticker.Stop()
 
@@ -125,6 +165,8 @@ func (r *SourcesController) Start(ctx context.Context) error {
 func (r *SourcesController) reconcileInformers() {
 	r.launchDesiredInformers()
 	r.cleanNotNeededInformers()
+
+	r.reconciled.Store(true)
 }
 
 // launchDesiredInformers starts an informer for each source type that is not already being watched

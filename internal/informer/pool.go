@@ -158,6 +158,26 @@ func (p *Pool) Snapshot(scope Scope) Snapshot {
 	return Snapshot{Objects: objects, Version: version}
 }
 
+// Synced reports whether every informer of the pool has filled its cache.
+// A replica that has not synced yet would evaluate policies with empty sources
+func (p *Pool) Synced() bool {
+
+	p.mu.RLock()
+	informers := make([]*Informer, 0, len(p.informers))
+	for _, inform := range p.informers {
+		informers = append(informers, inform)
+	}
+	p.mu.RUnlock()
+
+	for _, inform := range informers {
+		if inform == nil || !inform.HasSynced() {
+			return false
+		}
+	}
+
+	return true
+}
+
 // Owned returns the scopes the consumer is subscribed to
 func (p *Pool) Owned(consumer string) []Scope {
 	p.mu.RLock()
