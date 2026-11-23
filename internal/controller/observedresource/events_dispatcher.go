@@ -49,8 +49,8 @@ type EventDispatcher struct {
 	dependencies EventDispatcherDependencies
 
 	// Carried stuff
-	processors                map[string]Processor
-	kubeAvailableResourceList []GVKR
+	processors         map[string]Processor
+	availableResources availableResources
 }
 
 // NewEventDispatcher TODO
@@ -61,7 +61,6 @@ func NewEventDispatcher(deps EventDispatcherDependencies) *EventDispatcher {
 	}
 
 	// Start syncer for available resources in Kubernetes
-	evDispatcher.kubeAvailableResourceList = []GVKR{}
 	go evDispatcher.syncKubeAvailableResources()
 
 	//
@@ -85,7 +84,7 @@ func (d *EventDispatcher) syncKubeAvailableResources() {
 			goto takeANap
 		}
 
-		d.kubeAvailableResourceList = *resources
+		d.availableResources.replace(resources)
 
 	takeANap:
 		time.Sleep(5 * time.Second)
@@ -102,7 +101,7 @@ func (d *EventDispatcher) getInitializedProcessors() (processorsMap map[string]P
 		ClusterGenerationPolicyRegistry: d.dependencies.ClusterGenerationPolicyRegistry,
 		Evaluator:                       d.dependencies.Evaluator,
 		Engines:                         d.dependencies.Engines,
-		KubeAvailableResourceList:       &d.kubeAvailableResourceList,
+		AvailableResources:              &d.availableResources,
 	})
 
 	processorsMap = processors

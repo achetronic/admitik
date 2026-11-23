@@ -44,7 +44,7 @@ type GenerationProcessorDependencies struct {
 	Engines                         *template.Registry
 
 	//
-	KubeAvailableResourceList *[]GVKR
+	AvailableResources *availableResources
 }
 
 type GenerationProcessor struct {
@@ -139,7 +139,7 @@ func (p *GenerationProcessor) Process(resourceType string, eventType watch.Event
 		}
 
 		// Craft a metadata object for client-go to perform actions
-		tmpResource = getResourceFromGvk(p.dependencies.KubeAvailableResourceList, schema.GroupVersionKind{
+		tmpResource = getResourceFromGvk(p.dependencies.AvailableResources, schema.GroupVersionKind{
 			Group:   resultObjectBasicData.Group,
 			Version: resultObjectBasicData.Version,
 			Kind:    resultObjectBasicData.Kind,
@@ -226,3 +226,4 @@ func (p *GenerationProcessor) Process(resourceType string, eventType watch.Event
 		}
 	}
 }
+

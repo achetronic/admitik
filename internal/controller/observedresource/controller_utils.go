@@ -18,9 +18,13 @@ package observedresource
 
 import (
 	"strings"
+	"sync"
 
-	"github.com/freepik-company/admitik/internal/globals"
+	//
 	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	//
+	"github.com/freepik-company/admitik/internal/globals"
 )
 
 // GVKR represents TODO
@@ -33,10 +37,31 @@ type GVKR struct {
 	Namespaced bool
 }
 
-// fetchKubeAvailableResources TODO
-func fetchKubeAvailableResources() (resources *[]GVKR, err error) {
+// availableResources keeps the resource types the cluster supports. It is refreshed in background
+// and read by the processors, so it needs a lock
+type availableResources struct {
+	mu   sync.RWMutex
+	list []GVKR
+}
 
-	resources = &[]GVKR{}
+func (a *availableResources) replace(list []GVKR) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	a.list = list
+}
+
+func (a *availableResources) get() []GVKR {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	return a.list
+}
+
+// fetchKubeAvailableResources returns the resource types the cluster supports
+func fetchKubeAvailableResources() (resources []GVKR, err error) {
+
+	resources = []GVKR{}
 
 	_, apiGroupResourcesLists, err := globals.Application.KubeDiscoveryClient.ServerGroupsAndResources()
 	if err != nil {
@@ -70,17 +95,17 @@ func fetchKubeAvailableResources() (resources *[]GVKR, err error) {
 
 			tmpObj.Namespaced = apiGroupResource.Namespaced
 
-			*resources = append(*resources, *tmpObj)
+			resources = append(resources, *tmpObj)
 		}
 	}
 
 	return resources, nil
 }
 
-// getResourceFromGvk TODO
-func getResourceFromGvk(resourceList *[]GVKR, gvk schema.GroupVersionKind) string {
+// getResourceFromGvk returns the resource name of a kind, empty when the cluster does not have it
+func getResourceFromGvk(resources *availableResources, gvk schema.GroupVersionKind) string {
 
-	for _, object := range *resourceList {
+	for _, object := range resources.get() {
 		if object.GVK == gvk {
 			return object.Resource
 		}
