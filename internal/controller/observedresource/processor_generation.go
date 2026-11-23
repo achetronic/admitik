@@ -171,6 +171,8 @@ func (p *GenerationProcessor) Process(resourceType string, eventType watch.Event
 			Object: resultObject,
 		}
 
+		markProvenance(resultObjConverted, policyObj)
+
 		// Perform actions against Kubernetes
 		resourceClient = globals.Application.KubeRawClient.
 			Resource(schema.GroupVersionResource(tmpGvrnn.GroupVersionResource)).
@@ -227,3 +229,18 @@ func (p *GenerationProcessor) Process(resourceType string, eventType watch.Event
 	}
 }
 
+// markProvenance writes on the object which policy created it, so it can be told apart from the
+// objects the users write
+func markProvenance(object *unstructured.Unstructured, policy *v1alpha1.ClusterGenerationPolicy) {
+
+	labels := object.GetLabels()
+	if labels == nil {
+		labels = map[string]string{}
+	}
+
+	labels[v1alpha1.ManagedByLabel] = v1alpha1.ManagedByValue
+	labels[v1alpha1.PolicyLabel] = policy.Name
+	labels[v1alpha1.PolicyKindLabel] = "ClusterGenerationPolicy"
+
+	object.SetLabels(labels)
+}

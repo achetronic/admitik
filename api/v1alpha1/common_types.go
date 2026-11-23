@@ -83,3 +83,17 @@ type ConditionT struct {
 	Key    string `json:"key"`
 	Value  string `json:"value"`
 }
+
+const (
+	// ManagedByLabel marks the objects that Admitik wrote
+	ManagedByLabel = "admitik.dev/managed-by"
+
+	// ManagedByValue is the value of ManagedByLabel
+	ManagedByValue = "admitik"
+
+	// PolicyLabel names the policy that wrote the object
+	PolicyLabel = "admitik.dev/policy"
+
+	// PolicyKindLabel names the kind of that policy
+	PolicyKindLabel = "admitik.dev/policy-kind"
+)
