@@ -33,7 +33,7 @@ spec:
       key: |
         def compute_raw_match():
             incoming_route = object
-            existing_routes = sources["0"]
+            existing_routes = sources[0]
 
             # Extract incoming route's info for easier comparison
             incoming_name = incoming_route["metadata"]["name"]

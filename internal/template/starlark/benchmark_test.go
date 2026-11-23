@@ -94,9 +94,9 @@ func BenchmarkEvaluate(b *testing.B) {
 	// Top level loops are not allowed by the interpreter, so the script is wrapped like the samples do
 	source := `
 def run():
-    for item in sources[0]:
+    for item in sources["0"]:
         name = item["metadata"]["name"]
-    print(len(sources[0]))
+    print(len(sources["0"]))
 
 run()
 `

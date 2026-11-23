@@ -86,7 +86,7 @@ func toStarlark(value any) (starlark.Value, error) {
 		return toStarlarkDict(typed)
 
 	// The policy sources are indexed by their position in the policy spec, so the keys are
-	// integers. CEL already receives them this way, and Starlark must see the same thing
+	// integers, the same index CEL uses
 	case map[int][]map[string]any:
 		dict := starlark.NewDict(len(typed))
 		for key, items := range typed {
