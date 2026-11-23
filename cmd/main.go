@@ -51,10 +51,9 @@ import (
 	"github.com/freepik-company/admitik/internal/controller/observedresource"
 	"github.com/freepik-company/admitik/internal/controller/sources"
 	"github.com/freepik-company/admitik/internal/globals"
+	"github.com/freepik-company/admitik/internal/informer"
 	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
-	resourceInformerRegistry "github.com/freepik-company/admitik/internal/registry/resourceinformer"
 	resourceObserverRegistry "github.com/freepik-company/admitik/internal/registry/resourceobserver"
-	sourcesRegistry "github.com/freepik-company/admitik/internal/registry/sources"
 	"github.com/freepik-company/admitik/internal/server/admission"
 	"github.com/freepik-company/admitik/internal/template"
 	"github.com/freepik-company/admitik/internal/template/cel"
@@ -373,9 +372,13 @@ func main() {
 	clusterValidationPolicyReg := policyStore.NewPolicyStore[*v1alpha1.ClusterValidationPolicy]()
 	clusterMutationPolicyReg := policyStore.NewPolicyStore[*v1alpha1.ClusterMutationPolicy]()
 	clusterGenerationPolicyReg := policyStore.NewPolicyStore[*v1alpha1.ClusterGenerationPolicy]()
-	sourcesReg := sourcesRegistry.NewSourcesRegistry()
 	resourceObserverReg := resourceObserverRegistry.NewResourceObserverRegistry()
-	resourceInformerReg := resourceInformerRegistry.NewResourceInformerRegistry()
+
+	// One pool of informers shared by every controller: a resource type is watched once per pod
+	informersPool := informer.NewPool(
+		&globals.Application.Context,
+		globals.Application.KubeRawClient,
+		sourcesTimeToResyncInformers)
 
 	// Init internal registries controllers
 	// Following controllers manage internal registries for user-facing resources.
@@ -450,8 +453,7 @@ func main() {
 		Dependencies: observedresource.ObservedResourceControllerDependencies{
 			Context:                         &globals.Application.Context,
 			ClusterGenerationPolicyRegistry: clusterGenerationPolicyReg,
-			SourcesRegistry:                 sourcesReg,
-			ResourceInformerRegistry:        resourceInformerReg,
+			Pool:                            informersPool,
 			ResourceObserverRegistry:        resourceObserverReg,
 			Engines:                         engines,
 		},
@@ -480,8 +482,7 @@ func main() {
 				clusterValidationPolicyReg,
 			},
 
-			SourcesRegistry: sourcesReg,
-			Client:          globals.Application.KubeRawClient,
+			Pool: informersPool,
 		},
 	}
 	if err = mgr.Add(&sourcesController); err != nil {
@@ -504,9 +505,9 @@ func main() {
 		},
 		admission.AdmissionServerDependencies{
 			Context:                         &globals.Application.Context,
-			SourcesRegistry:                 sourcesReg,
 			ClusterValidationPolicyRegistry: clusterValidationPolicyReg,
 			ClusterMutationPolicyRegistry:   clusterMutationPolicyReg,
+			Pool:                            informersPool,
 			Engines:                         engines,
 		})
 	if err = mgr.Add(admissionServer); err != nil {

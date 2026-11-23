@@ -29,6 +29,9 @@ import (
 
 // contextWithObjects builds a context holding 'count' source objects, similar to a policy
 // listing configmaps across a cluster
+// createOperation is the operation used by the benchmarks
+const createOperation = "CREATE"
+
 func contextWithObjects(count int) *template.InjectedData {
 
 	objects := make([]map[string]any, 0, count)
@@ -46,7 +49,7 @@ func contextWithObjects(count int) *template.InjectedData {
 	}
 
 	data := template.NewInjectedData()
-	data.Operation = "CREATE"
+	data.Operation = createOperation
 	data.Object = map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Namespace",

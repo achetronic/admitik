@@ -31,8 +31,8 @@ import (
 
 	//
 	"github.com/freepik-company/admitik/api/v1alpha1"
+	"github.com/freepik-company/admitik/internal/informer"
 	"github.com/freepik-company/admitik/internal/registry/policystore"
-	"github.com/freepik-company/admitik/internal/registry/sources"
 	"github.com/freepik-company/admitik/internal/template"
 )
 
@@ -52,7 +52,7 @@ func versionOf(parts []string) string {
 // FetchPolicySources TODO
 func FetchPolicySources[T policystore.PolicyResourceI](
 	engines *template.Registry,
-	sourcesReg *sources.SourcesRegistry,
+	pool *informer.Pool,
 	policy T,
 	injectedData *template.InjectedData,
 ) (results map[int][]map[string]any, err error) {
@@ -72,7 +72,7 @@ func FetchPolicySources[T policystore.PolicyResourceI](
 			Version:  sourceItem.Version,
 			Resource: sourceItem.Resource}
 
-		snapshot := sourcesReg.Snapshot(gvr)
+		snapshot := pool.Snapshot(informer.Scope{GVR: gvr})
 
 		// Deep copy to avoid mutating the original policy (full of pointers, dude)
 		sourceItemCopy := sourceItem.DeepCopy()

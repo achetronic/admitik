@@ -23,35 +23,23 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/exp/maps"
-
 	//
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/dynamic/dynamicinformer"
-	"k8s.io/client-go/tools/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	//
 	"github.com/freepik-company/admitik/api/v1alpha1"
-	"github.com/freepik-company/admitik/internal/globals"
+	"github.com/freepik-company/admitik/internal/informer"
 	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
-	resourceInformerRegistry "github.com/freepik-company/admitik/internal/registry/resourceinformer"
 	resourceObserverRegistry "github.com/freepik-company/admitik/internal/registry/resourceobserver"
-	sourcesRegistry "github.com/freepik-company/admitik/internal/registry/sources"
 	"github.com/freepik-company/admitik/internal/template"
 )
 
 const (
-	// secondsToCheckInformerAck is the number of seconds before checking
-	// whether an informer is started or not during informers' reconciling process
-	secondsToCheckInformerAck = 10 * time.Second
-
 	// secondsToReconcileInformersAgain is the number of seconds to wait
 	// between the moment of launching informers, and repeating this process
 	// (avoid the spam, mate)
@@ -60,14 +48,13 @@ const (
 	//
 	controllerName = "observedresource"
 
+	// consumerName identifies this controller inside the pool, so it only releases its own watches
+	consumerName = "observedresource"
+
 	//
 	controllerContextFinishedMessage = "Controller finished by context"
-	controllerInformerStartedMessage = "Informer for '%s' has been started"
-	controllerInformerKilledMessage  = "Informer for resource type '%s' killed by StopSignal"
 
-	watchedObjectParseError         = "Impossible to process triggered object: %s"
-	resourceInformerLaunchingError  = "Impossible to start informer for resource type: %s"
-	resourceInformerGvrParsingError = "Failed to parse GVR from resourceType. Does it look like {group}/{version}/{resource}/{namespace}/{name}?"
+	resourceInformerParsingError = "Failed to parse the watched resource. Does it look like {group}/{version}/{resource}/{namespace}/{name}?"
 )
 
 // ObservedResourceControllerOptions represents available options that can be passed to ObservedResourceController on start
@@ -81,9 +68,11 @@ type ObservedResourceControllerDependencies struct {
 
 	//
 	ClusterGenerationPolicyRegistry *policyStore.PolicyStore[*v1alpha1.ClusterGenerationPolicy]
-	SourcesRegistry                 *sourcesRegistry.SourcesRegistry
-	ResourceInformerRegistry        *resourceInformerRegistry.ResourceInformerRegistry
-	ResourceObserverRegistry        *resourceObserverRegistry.ResourceObserverRegistry
+
+	// Pool owns the informers, shared with the rest of the controllers
+	Pool *informer.Pool
+
+	ResourceObserverRegistry *resourceObserverRegistry.ResourceObserverRegistry
 
 	// Engines renders the conditions and the generated objects
 	Engines *template.Registry
@@ -104,8 +93,7 @@ type ObservedResourceController struct {
 	Dependencies ObservedResourceControllerDependencies
 
 	// Carried stuff
-	kubeAvailableResourceList *[]GVKR // TODO: Time to wrap processors?
-	dispatcher                *EventDispatcher
+	dispatcher *EventDispatcher
 }
 
 // NeedLeaderElection implements manager.LeaderElectionRunnable.
@@ -133,34 +121,6 @@ func (r *ObservedResourceController) getResourcesFromPolicyRegistries() map[stri
 	return results
 }
 
-// informersCleanerWorker review the TODO
-// It disables the informers that are not needed and delete them from ResourcesRegistry
-// This function is intended to be used as goroutine
-func (r *ObservedResourceController) informersCleanerWorker() {
-	logger := log.FromContext(*r.Dependencies.Context).WithValues("controller", controllerName)
-
-	logger.Info("Starting Worker", "worker", "InformersCleaner")
-
-	for {
-		referentCandidates := r.getResourcesFromPolicyRegistries()
-		referentCandidatesKeys := maps.Keys(referentCandidates)
-
-		reviewedCandidates := r.Dependencies.ResourceInformerRegistry.GetRegisteredResourceTypes()
-
-		for _, resourceType := range reviewedCandidates {
-			if !slices.Contains(referentCandidatesKeys, resourceType) {
-				err := r.Dependencies.ResourceInformerRegistry.DisableInformer(resourceType)
-				if err != nil {
-					logger.WithValues("resourceType", resourceType).
-						Info("Failed disabling watcher informer")
-				}
-			}
-		}
-
-		time.Sleep(5 * time.Second)
-	}
-}
-
 // Start launches the ObservedResourceController and keeps it alive
 // It kills the controller on application's context death, and rerun the process when failed
 func (r *ObservedResourceController) Start(ctx context.Context) error {
@@ -170,153 +130,91 @@ func (r *ObservedResourceController) Start(ctx context.Context) error {
 	// Create an event dispatcher for later usage
 	r.dispatcher = NewEventDispatcher(EventDispatcherDependencies{
 		ClusterGenerationPolicyRegistry: r.Dependencies.ClusterGenerationPolicyRegistry,
-		SourcesRegistry:                 r.Dependencies.SourcesRegistry,
+		Pool:                            r.Dependencies.Pool,
 		ResourceObserverRegistry:        r.Dependencies.ResourceObserverRegistry,
 		Engines:                         r.Dependencies.Engines,
 	})
 
-	// Start cleaner for dead informers
-	go r.informersCleanerWorker()
+	ticker := time.NewTicker(secondsToReconcileInformersAgain)
+	defer ticker.Stop()
 
-	// Keep your controller alive
+	r.reconcileInformers()
 	for {
 		select {
+		case <-ctx.Done():
+			logger.Info(controllerContextFinishedMessage)
+			return nil
 		case <-(*r.Dependencies.Context).Done():
 			logger.Info(controllerContextFinishedMessage)
 			return nil
-		default:
+		case <-ticker.C:
 			r.reconcileInformers()
-			time.Sleep(secondsToReconcileInformersAgain)
 		}
 	}
 }
 
-// reconcileInformers checks each registered 'watchedResource' type and triggers informers
-// for those that are not already started.
+// reconcileInformers makes sure there is a watch for every resource some policy needs to observe,
+// and releases the ones nobody needs anymore
 func (r *ObservedResourceController) reconcileInformers() {
 	logger := log.FromContext(*r.Dependencies.Context).WithValues("controller", controllerName)
 
-	watcherCandidates := r.getResourcesFromPolicyRegistries()
+	watched := r.getResourcesFromPolicyRegistries()
 
-	for resourceType, observers := range watcherCandidates {
+	for resourceType, observers := range watched {
 
-		_, informerExists := r.Dependencies.ResourceInformerRegistry.GetInformer(resourceType)
-
-		// Store the observers needing this informer
-		if informerExists {
-			r.Dependencies.ResourceObserverRegistry.SetObservers(resourceType, observers)
-		}
-
-		// Avoid wasting CPU for nothing
-		if informerExists && r.Dependencies.ResourceInformerRegistry.IsStarted(resourceType) {
+		scope, err := scopeFromString(resourceType)
+		if err != nil {
+			logger.Error(err, resourceInformerParsingError, "resource", resourceType)
 			continue
 		}
 
-		//
-		if !informerExists || !r.Dependencies.ResourceInformerRegistry.IsStarted(resourceType) {
-			go r.launchInformerForType(resourceType)
+		// Store the observers that have to be triggered by this resource
+		r.Dependencies.ResourceObserverRegistry.SetObservers(resourceType, observers)
 
-			// Wait for the just started informer to ACK itself
-			time.Sleep(secondsToCheckInformerAck)
-			if !r.Dependencies.ResourceInformerRegistry.IsStarted(resourceType) {
-				logger.Info(fmt.Sprintf(resourceInformerLaunchingError, resourceType))
-			}
+		if _, err := r.Dependencies.Pool.Ensure(consumerName, scope, r.dispatchTo(resourceType)); err != nil {
+			logger.Error(err, "Failed ensuring the informer", "resource", resourceType)
+		}
+	}
+
+	// Release the watches that no policy needs anymore
+	for _, scope := range r.Dependencies.Pool.Owned(consumerName) {
+		if _, needed := watched[scope.String()]; !needed {
+			r.Dependencies.Pool.Release(consumerName, scope)
 		}
 	}
 }
 
-// launchInformerForType creates and runs a Kubernetes informer for the specified
-// resource type, and triggers processing for each event
-func (r *ObservedResourceController) launchInformerForType(resourceType string) {
-	logger := log.FromContext(*r.Dependencies.Context).WithValues("controller", controllerName)
+// dispatchTo returns the handler that forwards the events of a watched resource to its observers
+func (r *ObservedResourceController) dispatchTo(resourceType string) informer.EventHandlerFunc {
 
-	informer, informerExists := r.Dependencies.ResourceInformerRegistry.GetInformer(resourceType)
-	if !informerExists {
-		informer = r.Dependencies.ResourceInformerRegistry.RegisterInformer(resourceType)
-	}
+	return func(eventType watch.EventType, obj *unstructured.Unstructured, oldObj *unstructured.Unstructured) error {
 
-	logger.Info(fmt.Sprintf(controllerInformerStartedMessage, resourceType))
-
-	// Trigger ACK flag for informer that is launching
-	// Hey, this informer is blocking, so ACK is only disabled if the informer becomes dead
-	_ = r.Dependencies.ResourceInformerRegistry.SetStarted(resourceType, true)
-	defer func() {
-		_ = r.Dependencies.ResourceInformerRegistry.SetStarted(resourceType, false)
-	}()
-
-	// Extract GVR + Namespace + Name from watched type:
-	// {group}/{version}/{resource}/{namespace}/{name}
-	GVRNN := strings.Split(resourceType, "/")
-	if len(GVRNN) != 5 {
-		logger.Info(resourceInformerGvrParsingError)
-		return
-	}
-	resourceGVR := schema.GroupVersionResource{
-		Group:    GVRNN[0],
-		Version:  GVRNN[1],
-		Resource: GVRNN[2],
-	}
-
-	// Include the namespace when defined by the user (used as filter)
-	namespace := corev1.NamespaceAll
-	if GVRNN[3] != "" {
-		namespace = GVRNN[3]
-	}
-
-	// Include the name when defined by the user (used as filter)
-	name := GVRNN[4]
-
-	var listOptionsFunc dynamicinformer.TweakListOptionsFunc = func(options *metav1.ListOptions) {}
-	if name != "" {
-		listOptionsFunc = func(options *metav1.ListOptions) {
-			options.FieldSelector = "metadata.name=" + name
+		if oldObj == nil {
+			r.dispatcher.Dispatch(resourceType, eventType, obj.Object)
+			return nil
 		}
+
+		r.dispatcher.Dispatch(resourceType, eventType, obj.Object, oldObj.Object)
+		return nil
+	}
+}
+
+// scopeFromString parses a watched resource expressed as {group}/{version}/{resource}/{namespace}/{name}
+func scopeFromString(resourceType string) (informer.Scope, error) {
+
+	parts := strings.Split(resourceType, "/")
+	if len(parts) != 5 {
+		return informer.Scope{}, fmt.Errorf(
+			"invalid watched resource '%s': expected {group}/{version}/{resource}/{namespace}/{name}", resourceType)
 	}
 
-	// Listen to stop signal to kill this informer just in case it's needed
-	stopCh := make(chan struct{})
-
-	go func() {
-		<-informer.StopSignal
-		close(stopCh)
-		logger.Info(fmt.Sprintf(controllerInformerKilledMessage, resourceType))
-	}()
-
-	// Define our informer TODO
-	factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(globals.Application.KubeRawClient,
-		r.Options.InformerDurationToResync, namespace, listOptionsFunc)
-
-	// Create an informer. This is a special type of client-go informer that includes
-	// mechanisms to hide disconnections, handle reconnections, and cache watched objects
-	kubeInformer := factory.ForResource(resourceGVR).Informer()
-
-	// Register functions to handle different types of events
-	handlers := cache.ResourceEventHandlerFuncs{
-
-		AddFunc: func(eventObject interface{}) {
-			convertedEventObject := eventObject.(*unstructured.Unstructured)
-
-			r.dispatcher.Dispatch(resourceType, watch.Added, convertedEventObject.UnstructuredContent())
+	return informer.Scope{
+		GVR: schema.GroupVersionResource{
+			Group:    parts[0],
+			Version:  parts[1],
+			Resource: parts[2],
 		},
-		UpdateFunc: func(eventObjectOld, eventObject interface{}) {
-			convertedEventObjectOld := eventObjectOld.(*unstructured.Unstructured)
-			convertedEventObject := eventObject.(*unstructured.Unstructured)
-
-			r.dispatcher.Dispatch(resourceType, watch.Modified,
-				convertedEventObject.UnstructuredContent(), convertedEventObjectOld.UnstructuredContent())
-		},
-		DeleteFunc: func(eventObject interface{}) {
-			convertedEventObject := eventObject.(*unstructured.Unstructured)
-
-			r.dispatcher.Dispatch(resourceType, watch.Deleted, convertedEventObject.UnstructuredContent())
-		},
-	}
-
-	_, err := kubeInformer.AddEventHandler(handlers)
-	if err != nil {
-		logger.Error(err, "Error adding handling functions for events to an informer")
-		return
-	}
-
-	kubeInformer.Run(stopCh)
+		Namespace: parts[3],
+		Name:      parts[4],
+	}, nil
 }

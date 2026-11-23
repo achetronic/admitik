@@ -29,8 +29,8 @@ import (
 
 	//
 	"github.com/freepik-company/admitik/api/v1alpha1"
+	"github.com/freepik-company/admitik/internal/informer"
 	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
-	sourcesRegistry "github.com/freepik-company/admitik/internal/registry/sources"
 	"github.com/freepik-company/admitik/internal/template"
 )
 
@@ -49,7 +49,9 @@ type AdmissionServerDependencies struct {
 	//
 	ClusterValidationPolicyRegistry *policyStore.PolicyStore[*v1alpha1.ClusterValidationPolicy]
 	ClusterMutationPolicyRegistry   *policyStore.PolicyStore[*v1alpha1.ClusterMutationPolicy]
-	SourcesRegistry                 *sourcesRegistry.SourcesRegistry
+
+	// Pool holds the cached sources the policies need
+	Pool *informer.Pool
 
 	// Engines renders the conditions, patches and messages of the policies
 	Engines *template.Registry

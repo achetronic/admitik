@@ -124,7 +124,7 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 		logger = logger.WithValues("ClusterValidationPolicy", caPolicyObj.Name)
 
 		// Retrieve the sources declared per policy
-		tmpFetchedPolicySources, fetchErr := common.FetchPolicySources(s.dependencies.Engines, s.dependencies.SourcesRegistry, caPolicyObj, commonTemplateInjectedObject)
+		tmpFetchedPolicySources, fetchErr := common.FetchPolicySources(s.dependencies.Engines, s.dependencies.Pool, caPolicyObj, commonTemplateInjectedObject)
 		if fetchErr != nil {
 			logger.Info("failed fetching sources. Broken ones will be empty", "error", fetchErr.Error())
 		}

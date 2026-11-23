@@ -25,7 +25,6 @@ import (
 
 	//
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
@@ -33,7 +32,6 @@ import (
 	"github.com/freepik-company/admitik/internal/common"
 	"github.com/freepik-company/admitik/internal/informer"
 	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
-	sourcesRegistry "github.com/freepik-company/admitik/internal/registry/sources"
 )
 
 const (
@@ -44,6 +42,9 @@ const (
 
 	//
 	controllerName = "sources"
+
+	// consumerName identifies this controller inside the pool, so it only releases its own watches
+	consumerName = "sources"
 
 	//
 	controllerContextFinishedMessage = "Controller finished by context"
@@ -62,10 +63,8 @@ type SourcesControllerDependencies struct {
 	// Add a new policy type by appending its store here
 	PolicyStores []policyStore.SourceProvider
 
-	SourcesRegistry *sourcesRegistry.SourcesRegistry
-
-	// Client is the dynamic Kubernetes client used by the informers
-	Client dynamic.Interface
+	// Pool owns the informers, shared with the rest of the controllers
+	Pool *informer.Pool
 }
 
 // SourcesController represents a controller that triggers parallel threads.
@@ -140,37 +139,19 @@ func (r *SourcesController) launchDesiredInformers() {
 			continue
 		}
 
-		if r.Dependencies.SourcesRegistry.InformerIsRegistered(gvr) {
-			continue
+		if _, err := r.Dependencies.Pool.Ensure(consumerName, informer.Scope{GVR: gvr}); err != nil {
+			logger.Error(err, "Failed ensuring the informer", "source", resourceType)
 		}
-
-		newInformer, err := informer.NewInformer(
-			informer.Options{GVR: gvr, InformerDurationToResync: r.Options.InformerDurationToResync},
-			informer.Dependencies{Context: r.Dependencies.Context, Client: r.Dependencies.Client})
-		if err != nil {
-			logger.Error(err, "Failed creating informer", "source", resourceType)
-			continue
-		}
-
-		if err := r.Dependencies.SourcesRegistry.RegisterInformer(gvr, newInformer); err != nil {
-			logger.Error(err, "Failed registering informer", "source", resourceType)
-			continue
-		}
-
-		newInformer.Start()
 	}
 }
 
-// cleanNotNeededInformers stops the informers whose source is no longer referenced
-// by any policy and removes them from the sources registry
+// cleanNotNeededInformers releases the watches whose source is no longer referenced by any policy
 func (r *SourcesController) cleanNotNeededInformers() {
 	referentCandidates := r.getSourcesFromPolicies()
-	reviewedCandidates := r.Dependencies.SourcesRegistry.GetRegisteredResourceTypes()
 
-	for _, resourceType := range reviewedCandidates {
-
-		if !slices.Contains(referentCandidates, common.GvrString(resourceType)) {
-			r.Dependencies.SourcesRegistry.DestroyInformer(resourceType)
+	for _, scope := range r.Dependencies.Pool.Owned(consumerName) {
+		if !slices.Contains(referentCandidates, common.GvrString(scope.GVR)) {
+			r.Dependencies.Pool.Release(consumerName, scope)
 		}
 	}
 }

@@ -131,7 +131,7 @@ func (s *HttpServer) handleMutationRequest(response http.ResponseWriter, request
 		logger = logger.WithValues("ClusterMutationPolicy", cmPolicyObj.Name)
 
 		// Retrieve the sources declared per policy
-		tmpFetchedPolicySources, fetchErr := common.FetchPolicySources(s.dependencies.Engines, s.dependencies.SourcesRegistry, cmPolicyObj, commonTemplateInjectedObject)
+		tmpFetchedPolicySources, fetchErr := common.FetchPolicySources(s.dependencies.Engines, s.dependencies.Pool, cmPolicyObj, commonTemplateInjectedObject)
 		if fetchErr != nil {
 			logger.Info("failed fetching sources. Broken ones will be empty", "error", fetchErr.Error())
 		}

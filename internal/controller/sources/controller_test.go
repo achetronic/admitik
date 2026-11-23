@@ -27,8 +27,8 @@ import (
 	dynamicFake "k8s.io/client-go/dynamic/fake"
 
 	//
+	"github.com/freepik-company/admitik/internal/informer"
 	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
-	sourcesRegistry "github.com/freepik-company/admitik/internal/registry/sources"
 )
 
 type testSourceProvider struct {
@@ -42,7 +42,9 @@ func (p *testSourceProvider) GetReferencedSources() []string {
 func newTestController(t *testing.T, providers ...*testSourceProvider) *SourcesController {
 	t.Helper()
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
 	policyStores := make([]policyStore.SourceProvider, 0, len(providers))
 	for _, provider := range providers {
 		policyStores = append(policyStores, provider)
@@ -56,10 +58,11 @@ func newTestController(t *testing.T, providers ...*testSourceProvider) *SourcesC
 
 	return &SourcesController{
 		Dependencies: SourcesControllerDependencies{
-			Context:         &ctx,
-			PolicyStores:    policyStores,
-			SourcesRegistry: sourcesRegistry.NewSourcesRegistry(),
-			Client:          dynamicFake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds),
+			Context:      &ctx,
+			PolicyStores: policyStores,
+			Pool: informer.NewPool(&ctx,
+				dynamicFake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds),
+				0),
 		},
 	}
 }
@@ -93,18 +96,18 @@ func TestLaunchDesiredInformersStartsOneInformerPerSource(t *testing.T) {
 
 	controller.launchDesiredInformers()
 
-	registered := controller.Dependencies.SourcesRegistry.GetRegisteredResourceTypes()
-	if len(registered) != 2 {
-		t.Fatalf("got %d informers registered, expected 2 (%v)", len(registered), registered)
+	owned := controller.Dependencies.Pool.Owned(consumerName)
+	if len(owned) != 2 {
+		t.Fatalf("got %d scopes owned, expected 2 (%v)", len(owned), owned)
 	}
 
-	for _, gvr := range registered {
-		inform := controller.Dependencies.SourcesRegistry.GetInformer(gvr)
+	for _, scope := range owned {
+		inform := controller.Dependencies.Pool.Get(scope)
 		if inform == nil {
-			t.Fatalf("informer for %v is nil", gvr)
+			t.Fatalf("informer for %v is nil", scope)
 		}
 		if !inform.IsStarted() {
-			t.Errorf("informer for %v was not started", gvr)
+			t.Errorf("informer for %v was not started", scope)
 		}
 	}
 }
@@ -113,10 +116,11 @@ func TestLaunchDesiredInformersIsIdempotent(t *testing.T) {
 	controller := newTestController(t, &testSourceProvider{sources: []string{"/v1/configmaps"}})
 
 	controller.launchDesiredInformers()
-	first := controller.Dependencies.SourcesRegistry.GetInformer(schema.GroupVersionResource{Version: "v1", Resource: "configmaps"})
+	scope := informer.Scope{GVR: schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}}
+	first := controller.Dependencies.Pool.Get(scope)
 
 	controller.launchDesiredInformers()
-	second := controller.Dependencies.SourcesRegistry.GetInformer(schema.GroupVersionResource{Version: "v1", Resource: "configmaps"})
+	second := controller.Dependencies.Pool.Get(scope)
 
 	if first != second {
 		t.Error("the informer was rebuilt although the source did not change")
@@ -128,12 +132,12 @@ func TestLaunchDesiredInformersSkipsInvalidSources(t *testing.T) {
 
 	controller.launchDesiredInformers()
 
-	registered := controller.Dependencies.SourcesRegistry.GetRegisteredResourceTypes()
-	if len(registered) != 1 {
-		t.Fatalf("got %d informers registered, expected 1 (%v)", len(registered), registered)
+	owned := controller.Dependencies.Pool.Owned(consumerName)
+	if len(owned) != 1 {
+		t.Fatalf("got %d scopes owned, expected 1 (%v)", len(owned), owned)
 	}
-	if registered[0].Resource != "configmaps" {
-		t.Errorf("got %v, expected the configmaps informer", registered[0])
+	if owned[0].GVR.Resource != "configmaps" {
+		t.Errorf("got %v, expected the configmaps scope", owned[0])
 	}
 }
 
@@ -145,8 +149,30 @@ func TestCleanNotNeededInformers(t *testing.T) {
 	controller.Dependencies.PolicyStores[0].(*testSourceProvider).sources = nil
 	controller.cleanNotNeededInformers()
 
-	if registered := controller.Dependencies.SourcesRegistry.GetRegisteredResourceTypes(); len(registered) != 0 {
-		t.Errorf("got %v, expected no registered informers", registered)
+	if owned := controller.Dependencies.Pool.Owned(consumerName); len(owned) != 0 {
+		t.Errorf("got %v, expected no owned scopes", owned)
+	}
+}
+
+func TestCleanNotNeededInformersKeepsOtherConsumers(t *testing.T) {
+	controller := newTestController(t, &testSourceProvider{sources: []string{"/v1/configmaps"}})
+	controller.launchDesiredInformers()
+
+	// Another consumer asks for the same resource
+	scope := informer.Scope{GVR: schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}}
+	if _, err := controller.Dependencies.Pool.Ensure("another", scope); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	controller.Dependencies.PolicyStores[0].(*testSourceProvider).sources = nil
+	controller.cleanNotNeededInformers()
+
+	// This controller is gone, but the informer has to stay for the other one
+	if owned := controller.Dependencies.Pool.Owned(consumerName); len(owned) != 0 {
+		t.Errorf("got %v, expected no owned scopes", owned)
+	}
+	if controller.Dependencies.Pool.Get(scope) == nil {
+		t.Error("the informer was stopped although another consumer was using it")
 	}
 }
 

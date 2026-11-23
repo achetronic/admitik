@@ -31,6 +31,9 @@ import (
 	"github.com/freepik-company/admitik/internal/template"
 )
 
+// concurrentEvaluations is how many admission requests are simulated at the same time
+const concurrentEvaluations = 8
+
 func megabytes(bytes uint64) string {
 	return fmt.Sprintf("%.1f MiB", float64(bytes)/(1024*1024))
 }
@@ -219,7 +222,7 @@ func contextCopy(data *template.InjectedData) *template.InjectedData {
 func TestConversionMemoryAtScale(t *testing.T) {
 
 	if testing.Short() {
-		t.Skip("medicion de memoria: se omite con -short")
+		t.Skip("medición de memoria: se omite con -short")
 	}
 
 	const objects = 12000
@@ -271,11 +274,10 @@ func TestConversionMemoryAtScale(t *testing.T) {
 func TestConcurrentEvaluationMemoryAtScale(t *testing.T) {
 
 	if testing.Short() {
-		t.Skip("medicion de memoria: se omite con -short")
+		t.Skip("medición de memoria: se omite con -short")
 	}
 
 	const objects = 12000
-	const concurrency = 8
 
 	engine := New()
 	source := `
@@ -291,9 +293,9 @@ run()
 	data := configMaps(objects)
 
 	rebuilding := measure(func() {
-		evaluateConcurrently(t, engine, source, data, concurrency, "")
+		evaluateConcurrently(t, engine, source, data, "")
 	})
-	t.Logf("%d evaluaciones a la vez, arbol nuevo en cada una: %s", concurrency, rebuilding)
+	t.Logf("%d evaluaciones a la vez, arbol nuevo en cada una: %s", concurrentEvaluations, rebuilding)
 
 	// Warm up the cache so the measurement is of the reuse and not of the first build
 	if _, err := engine.Evaluate(source, withVersion(contextCopy(data), "v1")); err != nil {
@@ -301,9 +303,9 @@ run()
 	}
 
 	reusing := measure(func() {
-		evaluateConcurrently(t, engine, source, data, concurrency, "v1")
+		evaluateConcurrently(t, engine, source, data, "v1")
 	})
-	t.Logf("%d evaluaciones a la vez, arbol reutilizado: %s", concurrency, reusing)
+	t.Logf("%d evaluaciones a la vez, arbol reutilizado: %s", concurrentEvaluations, reusing)
 
 	if reusing.peakAllocated*4 > rebuilding.peakAllocated {
 		t.Errorf("reusing the tree saved less than expected: %s against %s",
@@ -316,11 +318,10 @@ run()
 func TestHTTPRouteCrossCheckMemoryAtScale(t *testing.T) {
 
 	if testing.Short() {
-		t.Skip("medicion de memoria: se omite con -short")
+		t.Skip("medición de memoria: se omite con -short")
 	}
 
 	const objects = 12000
-	const concurrency = 8
 
 	engine := New()
 
@@ -387,7 +388,7 @@ compute_raw_match()
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
-	t.Logf("una evaluacion, arbol nuevo: %s", single)
+	t.Logf("una evaluación, arbol nuevo: %s", single)
 
 	// What the engine did before the direct conversion, for reference
 	values := data.ToMap()
@@ -416,17 +417,17 @@ compute_raw_match()
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
-	t.Logf("una evaluacion, arbol reutilizado: %s", reused)
+	t.Logf("una evaluación, arbol reutilizado: %s", reused)
 
 	rebuilding := measure(func() {
-		evaluateConcurrently(t, engine, source, data, concurrency, "")
+		evaluateConcurrently(t, engine, source, data, "")
 	})
-	t.Logf("%d evaluaciones a la vez, arbol nuevo en cada una: %s", concurrency, rebuilding)
+	t.Logf("%d evaluaciones a la vez, arbol nuevo en cada una: %s", concurrentEvaluations, rebuilding)
 
 	reusing := measure(func() {
-		evaluateConcurrently(t, engine, source, data, concurrency, "routes-v1")
+		evaluateConcurrently(t, engine, source, data, "routes-v1")
 	})
-	t.Logf("%d evaluaciones a la vez, arbol reutilizado: %s", concurrency, reusing)
+	t.Logf("%d evaluaciones a la vez, arbol reutilizado: %s", concurrentEvaluations, reusing)
 
 	if reusing.peakAllocated*4 > rebuilding.peakAllocated {
 		t.Errorf("reusing the tree saved less than expected: %s against %s",
@@ -440,11 +441,12 @@ func withVersion(data *template.InjectedData, version string) *template.Injected
 	return data
 }
 
-func evaluateConcurrently(t *testing.T, engine *Engine, source string, data *template.InjectedData, concurrency int, version string) {
+// evaluateConcurrently runs 'concurrentEvaluations' evaluations at the same time
+func evaluateConcurrently(t *testing.T, engine *Engine, source string, data *template.InjectedData, version string) {
 	t.Helper()
 
 	var waitGroup sync.WaitGroup
-	for worker := 0; worker < concurrency; worker++ {
+	for worker := 0; worker < concurrentEvaluations; worker++ {
 		waitGroup.Add(1)
 		go func() {
 			defer waitGroup.Done()
