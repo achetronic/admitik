@@ -458,11 +458,17 @@ func main() {
 			InformerDurationToResync: sourcesTimeToResyncInformers,
 		},
 		Dependencies: sources.SourcesControllerDependencies{
-			Context:                         &globals.Application.Context,
-			ClusterGenerationPolicyRegistry: clusterGenerationPolicyReg,
-			ClusterMutationPolicyRegistry:   clusterMutationPolicyReg,
-			ClusterValidationPolicyRegistry: clusterValidationPolicyReg,
-			SourcesRegistry:                 sourcesReg,
+			Context: &globals.Application.Context,
+
+			// Every policy store whose 'sources' section must be watched. Add new policy types here
+			PolicyStores: []policyStore.SourceProvider{
+				clusterGenerationPolicyReg,
+				clusterMutationPolicyReg,
+				clusterValidationPolicyReg,
+			},
+
+			SourcesRegistry: sourcesReg,
+			Client:          globals.Application.KubeRawClient,
 		},
 	}
 	if err = mgr.Add(&sourcesController); err != nil {

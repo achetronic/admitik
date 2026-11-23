@@ -18,29 +18,25 @@ package sources
 
 import (
 	"context"
-	"github.com/freepik-company/admitik/internal/common"
-	"github.com/freepik-company/admitik/internal/informer"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
 
 	//
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	//
-	"github.com/freepik-company/admitik/api/v1alpha1"
-	"github.com/freepik-company/admitik/internal/globals"
+	"github.com/freepik-company/admitik/internal/common"
+	"github.com/freepik-company/admitik/internal/informer"
 	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
 	sourcesRegistry "github.com/freepik-company/admitik/internal/registry/sources"
 )
 
 const (
-	// secondsToCheckInformerAck is the number of seconds before checking
-	// whether an informer is started or not during informers' reconciling process
-	secondsToCheckInformerAck = 10 * time.Second
-
 	// secondsToReconcileInformersAgain is the number of seconds to wait
 	// between the moment of launching informers, and repeating this process
 	// (avoid the spam, mate)
@@ -62,17 +58,19 @@ type SourcesControllerOptions struct {
 type SourcesControllerDependencies struct {
 	Context *context.Context
 
-	//
-	ClusterGenerationPolicyRegistry *policyStore.PolicyStore[*v1alpha1.ClusterGenerationPolicy]
-	ClusterMutationPolicyRegistry   *policyStore.PolicyStore[*v1alpha1.ClusterMutationPolicy]
-	ClusterValidationPolicyRegistry *policyStore.PolicyStore[*v1alpha1.ClusterValidationPolicy]
+	// PolicyStores are all the stores whose 'sources' sections must be watched.
+	// Add a new policy type by appending its store here
+	PolicyStores []policyStore.SourceProvider
 
 	SourcesRegistry *sourcesRegistry.SourcesRegistry
+
+	// Client is the dynamic Kubernetes client used by the informers
+	Client dynamic.Interface
 }
 
 // SourcesController represents a controller that triggers parallel threads.
 // These threads watch resources defined in 'sources' section of several object types stored in registries.
-// Each thread is an informer in charge of a group of resources GVRNN (Group + Version + Resource + Namespace + Name)
+// Each thread is an informer in charge of a group of resources GVR (Group + Version + Resource)
 type SourcesController struct {
 	// Following interface is just needed to register this controller into Controller Runtime manager and let it
 	// launch the controller across all the Admitik replicas or just in the elected leader.
@@ -93,16 +91,13 @@ func (r *SourcesController) getSourcesFromPolicies() []string {
 
 	var referentCandidates []string
 
-	candidatesFromGeneration := r.Dependencies.ClusterGenerationPolicyRegistry.GetReferencedSources()
-	candidatesFromMutation := r.Dependencies.ClusterMutationPolicyRegistry.GetReferencedSources()
-	candidatesFromValidation := r.Dependencies.ClusterValidationPolicyRegistry.GetReferencedSources()
-	referentCandidates = slices.Concat(candidatesFromGeneration, candidatesFromMutation, candidatesFromValidation)
+	for _, policyStore := range r.Dependencies.PolicyStores {
+		referentCandidates = append(referentCandidates, policyStore.GetReferencedSources()...)
+	}
 
 	// Filter duplicated items
 	slices.Sort(referentCandidates)
-	referentCandidates = slices.Compact(referentCandidates)
-
-	return referentCandidates
+	return slices.Compact(referentCandidates)
 }
 
 // Start launches the SourcesController and keeps it alive
@@ -111,15 +106,17 @@ func (r *SourcesController) Start(ctx context.Context) error {
 	logger := log.FromContext(*r.Dependencies.Context).WithValues("controller", controllerName)
 	logger.Info("Starting Controller")
 
-	// Keep your controller alive
+	ticker := time.NewTicker(secondsToReconcileInformersAgain)
+	defer ticker.Stop()
+
+	r.reconcileInformers()
 	for {
 		select {
-		case <-(*r.Dependencies.Context).Done():
+		case <-ctx.Done():
 			logger.Info(controllerContextFinishedMessage)
 			return nil
-		default:
+		case <-ticker.C:
 			r.reconcileInformers()
-			time.Sleep(secondsToReconcileInformersAgain)
 		}
 	}
 }
@@ -131,41 +128,37 @@ func (r *SourcesController) reconcileInformers() {
 	r.cleanNotNeededInformers()
 }
 
-// launchDesiredInformers checks each registered source type and triggers informers
-// for those that are not already started.
+// launchDesiredInformers starts an informer for each source type that is not already being watched
 func (r *SourcesController) launchDesiredInformers() {
-	sourcesCandidates := r.getSourcesFromPolicies()
+	logger := log.FromContext(*r.Dependencies.Context).WithValues("controller", controllerName)
 
-	for _, resourceType := range sourcesCandidates {
+	for _, resourceType := range r.getSourcesFromPolicies() {
 
-		resourceTypeParts := strings.Split(resourceType, "/")
-
-		gvr := schema.GroupVersionResource{
-			Group:    resourceTypeParts[0],
-			Version:  resourceTypeParts[1],
-			Resource: resourceTypeParts[2],
+		gvr, err := gvrFromString(resourceType)
+		if err != nil {
+			logger.Error(err, "Skipping invalid source", "source", resourceType)
+			continue
 		}
 
-		tmpInformer := &informer.Informer{}
-
-		isRegistered := r.Dependencies.SourcesRegistry.InformerIsRegistered(gvr)
-		if !isRegistered {
-			// TODO: Review the error
-			tmpInformer, _ = informer.NewInformer(
-				informer.Options{GVR: gvr, InformerDurationToResync: r.Options.InformerDurationToResync},
-				informer.Dependencies{Context: r.Dependencies.Context, Client: globals.Application.KubeRawClient})
-
-			r.Dependencies.SourcesRegistry.RegisterInformer(gvr, tmpInformer)
-		} else {
-			tmpInformer = r.Dependencies.SourcesRegistry.GetInformer(gvr)
+		if r.Dependencies.SourcesRegistry.InformerIsRegistered(gvr) {
+			continue
 		}
 
-		tmpInformer.Start()
+		newInformer, err := informer.NewInformer(
+			informer.Options{GVR: gvr, InformerDurationToResync: r.Options.InformerDurationToResync},
+			informer.Dependencies{Context: r.Dependencies.Context, Client: r.Dependencies.Client})
+		if err != nil {
+			logger.Error(err, "Failed creating informer", "source", resourceType)
+			continue
+		}
+
+		r.Dependencies.SourcesRegistry.RegisterInformer(gvr, newInformer)
+		newInformer.Start()
 	}
 }
 
-// cleanNotNeededInformers review the 'sources' section of several object types stored in registries in the background.
-// It disables the informers that are not needed and delete them from sources registry
+// cleanNotNeededInformers stops the informers whose source is no longer referenced
+// by any policy and removes them from the sources registry
 func (r *SourcesController) cleanNotNeededInformers() {
 	referentCandidates := r.getSourcesFromPolicies()
 	reviewedCandidates := r.Dependencies.SourcesRegistry.GetRegisteredResourceTypes()
@@ -176,4 +169,20 @@ func (r *SourcesController) cleanNotNeededInformers() {
 			r.Dependencies.SourcesRegistry.DestroyInformer(resourceType)
 		}
 	}
+}
+
+// gvrFromString parses a source name expressed as {group}/{version}/{resource}
+func gvrFromString(resourceType string) (schema.GroupVersionResource, error) {
+
+	resourceTypeParts := strings.Split(resourceType, "/")
+	if len(resourceTypeParts) != 3 {
+		return schema.GroupVersionResource{}, fmt.Errorf(
+			"invalid source '%s': expected {group}/{version}/{resource}", resourceType)
+	}
+
+	return schema.GroupVersionResource{
+		Group:    resourceTypeParts[0],
+		Version:  resourceTypeParts[1],
+		Resource: resourceTypeParts[2],
+	}, nil
 }
