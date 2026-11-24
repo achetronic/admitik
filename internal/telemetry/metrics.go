@@ -37,13 +37,17 @@ const (
 type Outcome string
 
 const (
-	OutcomePatched    Outcome = "patched"
-	OutcomeSkipped    Outcome = "skipped"
+	// What a request ended up as
 	OutcomeAllowed    Outcome = "allowed"
 	OutcomeDenied     Outcome = "denied"
 	OutcomePermissive Outcome = "permissive"
-	OutcomeFailed     Outcome = "failed"
-	OutcomeGenerated  Outcome = "generated"
+	OutcomePatched    Outcome = "patched"
+	OutcomeUnchanged  Outcome = "unchanged"
+
+	// What one policy did over one object
+	OutcomeSkipped   Outcome = "skipped"
+	OutcomeFailed    Outcome = "failed"
+	OutcomeGenerated Outcome = "generated"
 )
 
 // Reason is why a policy could not be applied. It is a closed set: the error itself only goes to

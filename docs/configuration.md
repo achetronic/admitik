@@ -30,5 +30,34 @@ They are described in the following table:
 | `--excluded-admission-namespaces`      | Comma-separated list of namespaces to be excluded from admission evaluations          |          `-`           |
 | `--compliance-scan-interval`           | Interval between scans of the objects that already exist. `0` disables them           |          `0`           |
 
+## Logs
+
+Admitik writes one JSON line per event. Every line about a decision carries the same fields, with
+the same meaning as the metrics:
+
+| Field | Meaning |
+|:--|:--|
+| `kind` | `validate`, `mutate` or `generate` |
+| `policy` | the policy the line is about |
+| `resource` | the resource type, as `group/version/resource` |
+| `namespace`, `name` | the object |
+| `operation` | `CREATE`, `UPDATE` or `DELETE` |
+| `outcome` | `allowed`, `denied`, `permissive`, `patched`, `unchanged`, `skipped`, `generated` or `failed` |
+| `reason` | `none`, `sources`, `conditions`, `template`, `patch` or `apply` |
+| `duration` | how long the policy took |
+
+The message says what the line is:
+
+| `msg` | Level | What it says |
+|:--|:--|:--|
+| `admission decision` | info | The verdict of one admission request: `outcome`, `rejections` or `mutations` (the policies that shaped it), `evaluated` and `failures` |
+| `policy decision` | info when the policy acted, `debug` otherwise | What one policy did with one object |
+
+A policy that acted leaves its line at info: a rejection, a patch, a generated object or a failure.
+The ones that did nothing only appear with `--zap-log-level=debug`.
+
+Generation lines name the object that triggered them in `watched`, and the object they wrote in
+`resource`, `namespace` and `name`.
+
 > The flags of the logger are bound by controller-runtime, so `--zap-log-level` and the rest are
 > also available.

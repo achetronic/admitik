@@ -66,16 +66,19 @@ func (g *Generate) Process(
 	ctx context.Context, resourceType string, eventType watch.EventType, object ...map[string]any) {
 
 	resource := watchedResourceLabel(resourceType)
-	logger := log.FromContext(ctx).WithValues("action", "generate", "watched", resource)
+	logger := log.FromContext(ctx).WithValues(
+		"kind", telemetry.KindGenerate,
+		"watched", resource,
+		"operation", common.GetNormalizedOperation(eventType))
 
 	for _, policy := range g.dependencies.Policies.Store.GetResources(resourceType) {
 
-		policyLogger := logger.WithValues("policy", policy.Name, "kind", GenerationPolicyKind)
+		policyLogger := logger.WithValues("policy", policy.Name)
 		started := time.Now()
 
 		outcome, reason, objects, err := g.generate(ctx, policyLogger, policy, eventType, object)
 		if err != nil {
-			policyLogger.Error(err, "the object could not be generated", "reason", reason)
+			policyLogger.Error(err, "policy decision", "outcome", outcome, "reason", reason)
 		}
 
 		g.dependencies.Metrics.Evaluation(telemetry.KindGenerate, policy.Name, time.Since(started), objects)
@@ -152,14 +155,18 @@ func (g *Generate) generate(
 			fmt.Errorf("error writing the object of '%s': %w", policy.Name, err)
 	}
 
+	// From here the line describes the generated object, not the one that triggered it
 	logger = logger.WithValues("resource", result.Resource, "name", result.Name, "namespace", result.Namespace)
 
 	if result.Existing {
-		logger.V(1).Info("the object exists and 'overwriteExisting' is disabled")
+		logger.V(1).Info("policy decision",
+			"outcome", telemetry.OutcomeSkipped, "reason", telemetry.ReasonNone,
+			"message", "the object exists and 'overwriteExisting' is disabled")
 		return telemetry.OutcomeSkipped, telemetry.ReasonNone, sources, nil
 	}
 
-	logger.Info("the object was generated", "created", result.Created)
+	logger.Info("policy decision", "outcome", telemetry.OutcomeGenerated, "reason", telemetry.ReasonNone,
+		"created", result.Created)
 	return telemetry.OutcomeGenerated, telemetry.ReasonNone, sources, nil
 }
 

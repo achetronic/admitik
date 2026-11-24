@@ -57,8 +57,10 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 		return
 	}
 
-	// Automatically add some information to the logs
+	// Automatically add some information to the logs. Every line of this handler carries the same
+	// fields, with the same meaning as the metrics
 	logger = logger.WithValues(
+		"kind", telemetry.KindValidate,
 		"resource", resourceID(requestObj.Request.Resource),
 		"name", requestObj.Request.Name,
 		"namespace", requestObj.Request.Namespace,
@@ -68,7 +70,10 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 
 	// Tracking for the decision line written when the response goes out
 	evaluated := 0
-	rejectedBy := ""
+	rejections := []string{}
+	failures := 0
+	outcome := telemetry.OutcomeAllowed
+	message := ""
 
 	// Assume that the request is rejected as default
 	reviewResponse := &requestObj
@@ -81,11 +86,19 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 	}
 
 	defer func() {
-		// One line per request, with what the cluster finally decided
-		logger.Info("admission decision",
+		// One line per request, naming the policies that shaped the outcome
+		keysAndValues := []any{
+			"outcome", outcome,
 			"allowed", reviewResponse.Response.Allowed,
-			"policies", evaluated,
-			"rejectedBy", rejectedBy)
+			"rejections", rejections,
+			"evaluated", evaluated,
+			"failures", failures,
+		}
+		if message != "" {
+			keysAndValues = append(keysAndValues, "message", message)
+		}
+
+		logger.Info("admission decision", keysAndValues...)
 
 		responseBytes, err := json.Marshal(reviewResponse)
 		if err != nil {
@@ -126,7 +139,7 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 	for _, caPolicyObj := range caPolicyList {
 
 		// Automatically add some information to the logs
-		policyLogger := logger.WithValues("policy", caPolicyObj.Name, "kind", telemetry.KindValidate)
+		policyLogger := logger.WithValues("policy", caPolicyObj.Name)
 		started := time.Now()
 
 		specificTemplateInjectedObject := *commonTemplateInjectedObject
@@ -137,7 +150,9 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 
 		result := s.validateWith(caPolicyObj, &specificTemplateInjectedObject, prepared)
 		if result.Err != nil {
-			policyLogger.Error(result.Err, "the policy could not be applied", "reason", result.Reason)
+			failures++
+			policyLogger.Error(result.Err, "policy decision",
+				"outcome", result.Outcome, "reason", result.Reason)
 		}
 
 		s.dependencies.Metrics.Evaluation(telemetry.KindValidate, caPolicyObj.Name,
@@ -152,8 +167,17 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 		})
 
 		evaluated++
-		policyLogger.V(1).Info("policy evaluated",
-			"outcome", result.Outcome, "reason", result.Reason, "duration", time.Since(started).String())
+
+		decisionFields := []any{
+			"outcome", result.Outcome,
+			"reason", result.Reason,
+			"duration", time.Since(started).String(),
+		}
+		if result.Message != "" {
+			decisionFields = append(decisionFields, "message", result.Message)
+		}
+
+		policyLogger.V(1).Info("policy decision", decisionFields...)
 
 		if result.Warning != "" {
 			policyLogger.Info(result.Warning)
@@ -171,12 +195,15 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 		if result.Permissive {
 			addWarning(reviewResponse.Response, fmt.Sprintf(
 				"admitik: policy '%s' is in permissive mode, this object violates it", caPolicyObj.Name))
-			policyLogger.Info(fmt.Sprintf("object accepted with unmet conditions: %s", result.Message))
+			rejections = append(rejections, caPolicyObj.Name)
+			outcome = telemetry.OutcomePermissive
+			message = result.Message
 			continue
 		}
 
-		rejectedBy = caPolicyObj.Name
-		policyLogger.Info("the object was rejected", "message", result.Message)
+		rejections = append(rejections, caPolicyObj.Name)
+		outcome = telemetry.OutcomeDenied
+		message = result.Message
 		return
 	}
 

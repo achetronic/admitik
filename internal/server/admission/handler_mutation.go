@@ -62,8 +62,10 @@ func (s *HttpServer) handleMutationRequest(response http.ResponseWriter, request
 		return
 	}
 
-	// Automatically add some information to the logs
+	// Automatically add some information to the logs. Every line of this handler carries the same
+	// fields, with the same meaning as the metrics
 	logger = logger.WithValues(
+		"kind", telemetry.KindMutate,
 		"resource", resourceID(requestObj.Request.Resource),
 		"name", requestObj.Request.Name,
 		"namespace", requestObj.Request.Namespace,
@@ -73,7 +75,9 @@ func (s *HttpServer) handleMutationRequest(response http.ResponseWriter, request
 
 	// Tracking for the decision line written when the response goes out
 	evaluated := 0
-	patched := 0
+	mutations := []string{}
+	failures := 0
+	outcome := telemetry.OutcomeUnchanged
 
 	// Assume that the request is allowed by default
 	// Done in purpose as validation webhooks are executed later
@@ -85,11 +89,12 @@ func (s *HttpServer) handleMutationRequest(response http.ResponseWriter, request
 	}
 
 	defer func() {
-		// One line per request, with what the cluster finally decided
+		// One line per request, naming the policies that shaped the outcome
 		logger.Info("admission decision",
-			"allowed", reviewResponse.Response.Allowed,
-			"policies", evaluated,
-			"patched", patched)
+			"outcome", outcome,
+			"mutations", mutations,
+			"evaluated", evaluated,
+			"failures", failures)
 
 		responseBytes, err := json.Marshal(reviewResponse)
 		if err != nil {
@@ -134,7 +139,7 @@ func (s *HttpServer) handleMutationRequest(response http.ResponseWriter, request
 	for _, cmPolicyObj := range cmPolicyList {
 
 		// Automatically add some information to the logs
-		policyLogger := logger.WithValues("policy", cmPolicyObj.Name, "kind", telemetry.KindMutate)
+		policyLogger := logger.WithValues("policy", cmPolicyObj.Name)
 		started := time.Now()
 
 		specificTemplateInjectedObject := *commonTemplateInjectedObject
@@ -145,7 +150,9 @@ func (s *HttpServer) handleMutationRequest(response http.ResponseWriter, request
 
 		result := s.mutateWith(cmPolicyObj, &specificTemplateInjectedObject, patchedObjectBytes, prepared)
 		if result.Err != nil {
-			policyLogger.Error(result.Err, "the policy could not be applied", "reason", result.Reason)
+			failures++
+			policyLogger.Error(result.Err, "policy decision",
+				"outcome", result.Outcome, "reason", result.Reason)
 		}
 
 		s.dependencies.Metrics.Evaluation(telemetry.KindMutate, cmPolicyObj.Name,
@@ -160,7 +167,7 @@ func (s *HttpServer) handleMutationRequest(response http.ResponseWriter, request
 		})
 
 		evaluated++
-		policyLogger.V(1).Info("policy evaluated",
+		policyLogger.V(1).Info("policy decision",
 			"outcome", result.Outcome, "reason", result.Reason, "duration", time.Since(started).String())
 
 		if result.Warning != "" {
@@ -173,7 +180,8 @@ func (s *HttpServer) handleMutationRequest(response http.ResponseWriter, request
 			continue
 		}
 
-		patched++
+		outcome = telemetry.OutcomePatched
+		mutations = append(mutations, cmPolicyObj.Name)
 		patchedObjectBytes = result.Patched
 		jsonPatchOperations = append(jsonPatchOperations, result.Operations...)
 	}
