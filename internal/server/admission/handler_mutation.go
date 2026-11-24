@@ -29,9 +29,7 @@ import (
 	"github.com/wI2L/jsondiff"
 	admissionv1 "k8s.io/api/admission/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/yaml"
 
@@ -397,53 +395,4 @@ func (s *HttpServer) generateStrategicMergePatch(objectToPatch []byte, patch []b
 	}
 
 	return patchedObjectBytes, nil
-}
-
-// dryRunPatchedObject use a dynamic client for validating the patched object through dry-run
-// TODO: Implement this DRY-RUN as a test before sending the patch to Kubernetes
-func dryRunPatchedObject(req *admissionv1.AdmissionRequest, patched []byte) error {
-	var err error
-
-	// Ignore operations different from CREATE or UPDATE
-	if req.Operation != admissionv1.Create && req.Operation != admissionv1.Update {
-		return nil
-	}
-
-	// Transform patched object
-	var obj unstructured.Unstructured
-	if err := json.Unmarshal(patched, &obj.Object); err != nil {
-		return fmt.Errorf("failed to unmarshal patched object: %w", err)
-	}
-
-	// Rebuild GVR for the resource
-	gvr := schema.GroupVersionResource{
-		Group:    req.Resource.Group,
-		Version:  req.Resource.Version,
-		Resource: req.Resource.Resource,
-	}
-	namespace := req.Namespace
-
-	//
-	resourceClient := globals.Application.KubeRawClient.Resource(gvr)
-	var resource dynamic.ResourceInterface = resourceClient
-	if namespace != "" {
-		resource = resourceClient.Namespace(namespace)
-	}
-
-	switch req.Operation {
-	case admissionv1.Create:
-		_, err = resource.Create(globals.Application.Context, &obj, metav1.CreateOptions{
-			DryRun: []string{metav1.DryRunAll},
-		})
-	case admissionv1.Update:
-		_, err = resource.Update(globals.Application.Context, &obj, metav1.UpdateOptions{
-			DryRun: []string{metav1.DryRunAll},
-		})
-	}
-
-	if err != nil {
-		return fmt.Errorf("dry-run failed: %w", err)
-	}
-
-	return nil
 }
