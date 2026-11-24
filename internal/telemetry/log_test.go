@@ -251,3 +251,12 @@ func TestTheResultsThatReachInfo(t *testing.T) {
 		}
 	}
 }
+
+func TestTheCollectorRunsOnEveryReplica(t *testing.T) {
+	// A plain Runnable is added to the leader election group by Controller Runtime, so the
+	// collector has to say that it does not want to wait for it
+	collector := Collector{}
+	if collector.NeedLeaderElection() {
+		t.Error("the collector must run on every replica, not only on the leader")
+	}
+}

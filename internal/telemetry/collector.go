@@ -39,7 +39,14 @@ type Collector struct {
 	Counters map[Kind]PolicyCounter
 }
 
-var _ manager.Runnable = Collector{}
+var _ manager.LeaderElectionRunnable = Collector{}
+
+// NeedLeaderElection implements manager.LeaderElectionRunnable. Every replica publishes the
+// policies it holds, so this cannot wait for the election: a replica that lost them has to be
+// visible in its own metrics, whether it leads or not
+func (c Collector) NeedLeaderElection() bool {
+	return false
+}
 
 // Start collects the policy counts until the manager stops
 func (c Collector) Start(ctx context.Context) error {
