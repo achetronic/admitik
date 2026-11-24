@@ -65,8 +65,8 @@ func NewGenerate(dependencies GenerateDependencies) *Generate {
 func (g *Generate) Process(
 	ctx context.Context, resourceType string, eventType watch.EventType, object ...map[string]any) {
 
-	logger := log.FromContext(ctx).WithValues("action", "generate", "watched", resourceType)
 	resource := watchedResourceLabel(resourceType)
+	logger := log.FromContext(ctx).WithValues("action", "generate", "watched", resource)
 
 	for _, policy := range g.dependencies.Policies.Store.GetResources(resourceType) {
 

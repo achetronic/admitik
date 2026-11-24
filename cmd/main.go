@@ -165,8 +165,10 @@ func main() {
 		"Interval between compliance scans over the objects that already exist. Zero disables them")
 
 	// Ref: https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/log/zap@v0.21.0#Options.BindFlags
+	// Production by default: JSON at info level, which is what a log pipeline reads.
+	// '--zap-devel' switches to the console encoder and the debug level
 	opts := zap.Options{
-		Development: true,
+		Development: false,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()

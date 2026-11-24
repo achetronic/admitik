@@ -59,12 +59,8 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 
 	// Automatically add some information to the logs
 	logger = logger.WithValues(
-		"object", fmt.Sprintf("%s/%s/%s/%s",
-			requestObj.Request.Resource.Group,
-			requestObj.Request.Resource.Version,
-			requestObj.Request.Resource.Resource,
-			requestObj.Request.Name,
-		),
+		"resource", resourceID(requestObj.Request.Resource),
+		"name", requestObj.Request.Name,
 		"namespace", requestObj.Request.Namespace,
 		"operation", requestObj.Request.Operation)
 
