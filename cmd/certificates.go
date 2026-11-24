@@ -169,6 +169,21 @@ func createCertificateSecret(options certificateOptions) (certificateData, error
 				certificatePrivateKeyKey:  privateKey,
 			},
 		}, metav1.CreateOptions{})
+
+	// Every replica generates a certificate when the Secret is missing, and only one of them wins.
+	// The others read the one that won, so all of them serve the same certificate
+	if apierrors.IsAlreadyExists(err) {
+		secret, readErr := readCertificateSecret(options)
+		if readErr != nil {
+			return certificateData{}, readErr
+		}
+		if secret == nil {
+			return certificateData{}, fmt.Errorf("the secret '%s' existed but it is not there anymore", options.SecretName)
+		}
+
+		return certificateFromSecret(secret)
+	}
+
 	if err != nil {
 		return certificateData{}, fmt.Errorf("error storing the certificate in the secret '%s': %w", options.SecretName, err)
 	}

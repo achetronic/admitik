@@ -24,6 +24,10 @@ import (
 	//
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sfake "k8s.io/client-go/kubernetes/fake"
+
+	//
+	"github.com/freepik-company/admitik/internal/globals"
 )
 
 func TestDNSNames(t *testing.T) {
@@ -143,5 +147,34 @@ func TestWriteCertificateFiles(t *testing.T) {
 		if string(content) != expected {
 			t.Errorf("got %q in %s, expected %q", string(content), path, expected)
 		}
+	}
+}
+
+func TestCreateCertificateSecretWhenAnotherReplicaWonTheRace(t *testing.T) {
+	// El Secret ya existe porque otro pod lo creo mientras este generaba el suyo
+	existing := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "certs", Namespace: "admitik-system"},
+		Data: map[string][]byte{
+			certificateCAKey:          []byte("from-the-winner"),
+			certificateCertificateKey: []byte("from-the-winner"),
+			certificatePrivateKeyKey:  []byte("from-the-winner"),
+		},
+	}
+
+	previous := globals.Application.KubeRawCoreClient
+	globals.Application.KubeRawCoreClient = k8sfake.NewSimpleClientset(existing)
+	defer func() { globals.Application.KubeRawCoreClient = previous }()
+
+	data, err := createCertificateSecret(certificateOptions{
+		SecretName: "certs",
+		Namespace:  "admitik-system",
+		Hostname:   "webhooks.admitik.svc",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if data.ca != "from-the-winner" {
+		t.Errorf("got %q, expected the certificate that is in the secret", data.ca)
 	}
 }
