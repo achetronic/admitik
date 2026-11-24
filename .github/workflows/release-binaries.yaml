@@ -42,7 +42,7 @@ jobs:
 
           echo "release_tag=${TAG}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           ref: ${{ steps.read_tag.outputs.release_tag }}
 
