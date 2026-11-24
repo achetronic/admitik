@@ -141,7 +141,9 @@ HIDDEN UNTIL DOC PAGES ARE FULLY CRAFTED
 
 We will cover all the installation methods in documentation soon, in the meanwhile, instructions here!
 
-[Helm registry](https://admitikcore.github.io/admitik/)
+```console
+helm install admitik oci://ghcr.io/admitikcore/admitik/charts/admitik --version 1.10.0
+```
 
 <!---
 HIDDEN UNTIL DOC PAGES ARE FULLY CRAFTED

@@ -7,28 +7,21 @@ on:
   release:
     types: [ published ]
 
+permissions:
+  # The chart is published as an OCI artifact in the packages of this repository
+  packages: write
+  contents: read
+
 jobs:
   release:
-    # depending on default permission settings for your org (contents being read-only or read-write for workloads), you will have to add permissions
-    # see: https://docs.github.com/en/actions/security-guides/automatic-token-authentication#modifying-the-permissions-for-the-github_token
-    permissions:
-      contents: write
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Configure Git
-        run: |
-          git config user.name "$GITHUB_ACTOR"
-          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
-
       - name: Install Helm
         uses: azure/setup-helm@v4
-        with:
-          token: "${{ secrets.GITHUB_TOKEN }}"
 
       - name: Check the release tag matches the chart
         if: github.event_name == 'release'
@@ -49,15 +42,12 @@ jobs:
             exit 1
           fi
 
-      - name: Run chart-releaser
-        uses: helm/chart-releaser-action@v1.6.0
-        with:
-          charts_dir: charts
-          packages_with_index: true
-          pages_branch: helm-registry
-          config: .github/chart-releaser-config.yaml
-        env:
-          CR_OWNER: "$GITHUB_REPOSITORY_OWNER"
-          CR_GIT_REPO: admitik
-          CR_SKIP_EXISTING: true
-          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+      - name: Package the chart
+        run: helm package charts/admitik --destination dist
+
+      - name: Push the chart to the registry
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+          helm push dist/admitik-*.tgz "oci://ghcr.io/${{ github.repository }}/charts"
