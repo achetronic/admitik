@@ -104,6 +104,16 @@ func (r *ClusterMutationPolicyReconciler) Reconcile(ctx context.Context, req ctr
 		// 2.1 It does NOT exist: manage removal
 		if err = client.IgnoreNotFound(err); err == nil {
 			logger.Info(fmt.Sprintf(controller.ResourceNotFoundError, controller.ClusterMutationPolicyResourceType, req.Name))
+
+			// The rules of the webhook are built from the policies that exist, so the last
+			// deletion has to rewrite them now that the object is really gone. Without this,
+			// the rules of the deleted policy would stay in the configuration forever
+			if r.IsLeader() {
+				if syncErr := r.SyncWebhookConfiguration(ctx); syncErr != nil {
+					logger.Info(fmt.Sprintf(controller.ResourceReconcileError, controller.ClusterMutationPolicyResourceType, req.Name, syncErr.Error()))
+				}
+			}
+
 			return result, err
 		}
 
