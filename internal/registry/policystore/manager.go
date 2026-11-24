@@ -24,15 +24,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	//
-	"github.com/freepik-company/admitik/internal/pubsub"
 	"github.com/freepik-company/admitik/internal/store/simple"
 )
 
 func NewPolicyStore[T PolicyResourceI]() *PolicyStore[T] {
 
 	return &PolicyStore[T]{
-		Store:       simple.NewStore[T](),
-		Broadcaster: pubsub.NewBroadcaster[T](),
+		Store: simple.NewStore[T](),
 	}
 }
 

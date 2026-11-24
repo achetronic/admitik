@@ -31,7 +31,6 @@ import (
 	//
 	"github.com/freepik-company/admitik/api/v1alpha1"
 	"github.com/freepik-company/admitik/internal/controller"
-	"github.com/freepik-company/admitik/internal/pubsub"
 )
 
 const (
@@ -62,12 +61,6 @@ func (r *ClusterValidationPolicyReconciler) ReconcileClusterValidationPolicy(
 	ctx context.Context, eventType watch.EventType, resourceManifest *v1alpha1.ClusterValidationPolicy) (err error) {
 
 	logger := log.FromContext(ctx)
-
-	// Publish the event in the registry event bus
-	r.Dependencies.ClusterValidationPolicyRegistry.Broadcaster.Publish(pubsub.Event[*v1alpha1.ClusterValidationPolicy]{
-		Type:   string(eventType),
-		Object: resourceManifest,
-	})
 
 	watched := WatchedTypes(resourceManifest)
 

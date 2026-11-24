@@ -22,8 +22,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/freepik-company/admitik/internal/pubsub"
-
 	//
 	"k8s.io/apimachinery/pkg/watch"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -42,12 +40,6 @@ const (
 // ReconcileClusterGenerationPolicy keeps internal ClusterGenerationPolicy resources' registry up-to-date
 func (r *ClusterGenerationPolicyReconciler) ReconcileClusterGenerationPolicy(ctx context.Context, eventType watch.EventType, resourceManifest *v1alpha1.ClusterGenerationPolicy) (err error) {
 	logger := log.FromContext(ctx)
-
-	// Publish the event in the registry event bus
-	r.Dependencies.ClusterGenerationPolicyRegistry.Broadcaster.Publish(pubsub.Event[*v1alpha1.ClusterGenerationPolicy]{
-		Type:   string(eventType),
-		Object: resourceManifest,
-	})
 
 	// The objects the policy wrote are removed before the policy disappears
 	if eventType == watch.Deleted && isCascading(resourceManifest) {
