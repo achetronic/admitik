@@ -6,9 +6,7 @@ import (
 )
 
 // ExtensionGvkNotFoundInSchemaError indicates the obvious message you can read
-type ExtensionGvkNotFoundInSchemaError struct {
-	error
-}
+type ExtensionGvkNotFoundInSchemaError struct{}
 
 func (e *ExtensionGvkNotFoundInSchemaError) Error() string {
 	return fmt.Sprintf("extension '%v' not found in schema", extGroupVersionKind)

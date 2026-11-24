@@ -205,14 +205,6 @@ func TestGetStoreReturnsCachedObjects(t *testing.T) {
 	if object.GetName() != "existing" {
 		t.Errorf("got cached object %q, expected 'existing'", object.GetName())
 	}
-
-	_, found, err := inform.GetIndexer().GetByKey("default/existing")
-	if err != nil {
-		t.Fatalf("GetByKey returned an error: %v", err)
-	}
-	if !found {
-		t.Error("object is missing from the indexer")
-	}
 }
 
 func TestStoppingInformersThroughTheRegistry(t *testing.T) {

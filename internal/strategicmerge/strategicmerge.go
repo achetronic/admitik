@@ -362,7 +362,7 @@ func getPatchStrategyFromSchema(schema proto.Schema) schemaPatchStrategyInfo {
 
 // generateCompositeKey creates a stable, unique string key from an item's specified merge fields.
 func generateCompositeKey(item map[string]interface{}, mergeKeys []string) (string, error) {
-	var parts []string
+	parts := make([]string, 0, len(mergeKeys))
 	for _, key := range mergeKeys {
 
 		value, exists := item[key]
@@ -445,7 +445,7 @@ func (r *StrategicMergePatcher) mergeLists(original, patch []interface{}, patchI
 		patchIndex[compositeKey] = itemMap
 	}
 
-	var resultList []interface{}
+	resultList := make([]interface{}, 0, len(original))
 	var partialProcessingErrors []error
 
 	// Iterate through the original list to merge or keep items.

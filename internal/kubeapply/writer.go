@@ -59,9 +59,6 @@ type Options struct {
 
 // Result is what happened with the object
 type Result struct {
-	Group     string
-	Version   string
-	Kind      string
 	Resource  string
 	Namespace string
 	Name      string
@@ -76,23 +73,20 @@ type Result struct {
 // Apply writes the object, resolving its resource type and marking it as written by the policy
 func (w *Writer) Apply(ctx context.Context, options Options, object map[string]any) (Result, error) {
 
-	result := Result{}
 	converted := &unstructured.Unstructured{Object: object}
-
-	groupVersion := converted.GroupVersionKind().GroupVersion()
-	result.Version = groupVersion.Version
-	result.Group = groupVersion.Group
-	result.Kind = converted.GetKind()
-	result.Namespace = converted.GetNamespace()
-	result.Name = converted.GetName()
+	gvk := converted.GroupVersionKind()
 
 	mapping, err := w.mapper.RESTMapping(
-		schema.GroupKind{Group: result.Group, Kind: result.Kind}, result.Version)
+		schema.GroupKind{Group: gvk.Group, Kind: gvk.Kind}, gvk.Version)
 	if err != nil {
-		return result, fmt.Errorf("error resolving the resource of %s/%s: %w", result.Group, result.Kind, err)
+		return Result{}, fmt.Errorf("error resolving the resource of %s: %w", gvk, err)
 	}
 
-	result.Resource = mapping.Resource.Resource
+	result := Result{
+		Resource:  mapping.Resource.Resource,
+		Namespace: converted.GetNamespace(),
+		Name:      converted.GetName(),
+	}
 
 	markProvenance(converted, options)
 	resourceClient := w.client.Resource(mapping.Resource).Namespace(result.Namespace)

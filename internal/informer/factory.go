@@ -287,8 +287,3 @@ func (r *Informer) HasSynced() bool {
 func (r *Informer) GetStore() cache.Store {
 	return r.rawInformer.GetStore()
 }
-
-// GetIndexer returns the cache indexer holding the watched objects
-func (r *Informer) GetIndexer() cache.Indexer {
-	return r.rawInformer.GetIndexer()
-}
