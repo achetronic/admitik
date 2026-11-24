@@ -169,6 +169,10 @@ func (s *HttpServer) handleMutationRequest(response http.ResponseWriter, request
 
 	// All working mutation patches are collected from policies, send them to Kubernetes
 	jsonPatchOperationBytes, err := json.Marshal(jsonPatchOperations)
+	if err != nil {
+		logger.Info(fmt.Sprintf("failed encoding the patch: %s", err.Error()))
+		return
+	}
 
 	reviewResponse.Response.Patch = jsonPatchOperationBytes
 	patchType := admissionv1.PatchTypeJSONPatch
@@ -383,8 +387,7 @@ func (s *HttpServer) generateStrategicMergePatch(objectToPatch []byte, patch []b
 		Kind:    desiredGvk.Kind,
 	})
 
-	patchedObject := map[string]any{}
-	patchedObject, err = s.strategicMergePatcher.StrategicMerge(tmpOriginalObject, tmpPatchObject, initialSchema)
+	patchedObject, err := s.strategicMergePatcher.StrategicMerge(tmpOriginalObject, tmpPatchObject, initialSchema)
 	if err != nil {
 		return nil, err
 	}
