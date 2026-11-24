@@ -46,6 +46,7 @@ import (
 	//
 	"github.com/freepik-company/admitik/api/v1alpha1"
 	"github.com/freepik-company/admitik/internal/audit"
+	"github.com/freepik-company/admitik/internal/cascade"
 	"github.com/freepik-company/admitik/internal/certificates"
 	"github.com/freepik-company/admitik/internal/controller"
 	"github.com/freepik-company/admitik/internal/controller/clustergenerationpolicy"
@@ -407,6 +408,8 @@ func main() {
 		Options: clustergenerationpolicy.ClusterGenerationPolicyControllerOptions{},
 		Dependencies: clustergenerationpolicy.ClusterGenerationPolicyControllerDependencies{
 			ClusterGenerationPolicyRegistry: clusterGenerationPolicyReg,
+			Cascade: cascade.New(globals.Application.KubeRawClient,
+				globals.Application.KubeDiscoveryClient),
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ClusterGenerationPolicy")

@@ -37,8 +37,24 @@ type ObjectT struct {
 }
 
 // ClusterGenerationPolicySpec defines the desired state of ClusterGenerationPolicy
+const (
+	// DeletionPolicyKeep leaves the generated objects in the cluster when the policy is deleted
+	DeletionPolicyKeep string = "Keep"
+
+	// DeletionPolicyDelete removes the objects the policy generated when it is deleted
+	DeletionPolicyDelete string = "Delete"
+)
+
 type ClusterGenerationPolicySpec struct {
 	OverwriteExisting bool `json:"overwriteExisting,omitempty"`
+
+	// DeletionPolicy decides what happens to the generated objects when this policy is deleted.
+	// Delete removes everything the policy has written, which includes the objects it adopted
+	// when 'overwriteExisting' is enabled
+	// +kubebuilder:validation:Enum=Keep;Delete
+	// +kubebuilder:default=Keep
+	// +optional
+	DeletionPolicy string `json:"deletionPolicy,omitempty"`
 
 	// WatchedResources represents a list of resource-groups that will be watched to be evaluated
 	// +listType=map

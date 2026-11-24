@@ -40,8 +40,16 @@ import (
 type ClusterGenerationPolicyControllerOptions struct {
 }
 
+// Deleter removes the objects a policy generated
+type Deleter interface {
+	Delete(ctx context.Context, policyKind, policyName string) (int, error)
+}
+
 type ClusterGenerationPolicyControllerDependencies struct {
 	ClusterGenerationPolicyRegistry *policyStore.PolicyStore[*v1alpha1.ClusterGenerationPolicy]
+
+	// Cascade removes the generated objects when the policy asks for it. It can be nil
+	Cascade Deleter
 }
 
 // ClusterGenerationPolicyReconciler reconciles a ClusterGenerationPolicy object

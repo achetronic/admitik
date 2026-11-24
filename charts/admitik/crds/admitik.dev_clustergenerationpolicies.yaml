@@ -65,6 +65,16 @@ spec:
                 x-kubernetes-list-map-keys:
                 - name
                 x-kubernetes-list-type: map
+              deletionPolicy:
+                default: Keep
+                description: |-
+                  DeletionPolicy decides what happens to the generated objects when this policy is deleted.
+                  Delete removes everything the policy has written, which includes the objects it adopted
+                  when 'overwriteExisting' is enabled
+                enum:
+                - Keep
+                - Delete
+                type: string
               object:
                 description: ObjectT TODO
                 properties:
