@@ -45,6 +45,7 @@ const (
 	DeletionPolicyDelete string = "Delete"
 )
 
+// ClusterGenerationPolicySpec defines the desired state of ClusterGenerationPolicy
 type ClusterGenerationPolicySpec struct {
 	OverwriteExisting bool `json:"overwriteExisting,omitempty"`
 

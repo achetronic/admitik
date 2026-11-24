@@ -49,7 +49,8 @@ spec:
           metadata:
             type: object
           status:
-            description: ClusterAuditReportStatus is the result of the last compliance scan
+            description: ClusterAuditReportStatus is the result of the last compliance
+              scan
             properties:
               duration:
                 description: Duration is how long the scan took, as a human readable
@@ -66,15 +67,15 @@ spec:
                         conditions
                       type: integer
                     errors:
-                      description: Errors is the number of objects that could not be
-                        evaluated
+                      description: Errors is the number of objects that could not
+                        be evaluated
                       type: integer
                     kind:
                       description: Kind is the kind of the policy
                       type: string
                     nonCompliant:
-                      description: NonCompliant is the number of objects that did not
-                        meet the conditions
+                      description: NonCompliant is the number of objects that did
+                        not meet the conditions
                       type: integer
                     policy:
                       description: Policy is the name of the policy that was evaluated
@@ -106,7 +107,7 @@ spec:
                 format: date-time
                 type: string
               summary:
-                description: AuditSummary aggregates the results of a scan
+                description: Summary aggregates the results
                 properties:
                   compliant:
                     description: Compliant is the number of objects that met the conditions
