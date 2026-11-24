@@ -31,6 +31,7 @@ import (
 
 	//
 	"github.com/admitikcore/admitik/api/v1alpha1"
+	"github.com/admitikcore/admitik/internal/common"
 	"github.com/admitikcore/admitik/internal/evaluator"
 	"github.com/admitikcore/admitik/internal/telemetry"
 	"github.com/admitikcore/admitik/internal/template"
@@ -57,23 +58,10 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 		return
 	}
 
-	// Automatically add some information to the logs. Every line of this handler carries the same
-	// fields, with the same meaning as the metrics
-	logger = logger.WithValues(
-		"kind", telemetry.KindValidate,
-		"resource", resourceID(requestObj.Request.Resource),
-		"name", requestObj.Request.Name,
-		"namespace", requestObj.Request.Namespace,
-		"operation", requestObj.Request.Operation)
+	// The object every line of this handler is about
+	objectRef := common.ObjectRefOfAdmission(requestObj.Request.Kind, requestObj.Request.Namespace, requestObj.Request.Name)
 
-	logger.V(1).Info("object under validation review")
-
-	// Tracking for the decision line written when the response goes out
-	evaluated := 0
-	rejections := []string{}
-	failures := 0
-	outcome := telemetry.OutcomeAllowed
-	message := ""
+	logger.V(1).Info("object under validation review", "object", objectRef)
 
 	// Assume that the request is rejected as default
 	reviewResponse := &requestObj
@@ -86,20 +74,6 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 	}
 
 	defer func() {
-		// One line per request, naming the policies that shaped the outcome
-		keysAndValues := []any{
-			"outcome", outcome,
-			"allowed", reviewResponse.Response.Allowed,
-			"rejections", rejections,
-			"evaluated", evaluated,
-			"failures", failures,
-		}
-		if message != "" {
-			keysAndValues = append(keysAndValues, "message", message)
-		}
-
-		logger.Info("admission decision", keysAndValues...)
-
 		responseBytes, err := json.Marshal(reviewResponse)
 		if err != nil {
 			logger.Info(fmt.Sprintf("failed converting final response.body into valid JSON: %s", err.Error()))
@@ -139,7 +113,6 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 	for _, caPolicyObj := range caPolicyList {
 
 		// Automatically add some information to the logs
-		policyLogger := logger.WithValues("policy", caPolicyObj.Name)
 		started := time.Now()
 
 		specificTemplateInjectedObject := *commonTemplateInjectedObject
@@ -149,11 +122,6 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 		}, &specificTemplateInjectedObject)
 
 		result := s.validateWith(caPolicyObj, &specificTemplateInjectedObject, prepared)
-		if result.Err != nil {
-			failures++
-			policyLogger.Error(result.Err, "policy decision",
-				"outcome", result.Outcome, "reason", result.Reason)
-		}
 
 		s.dependencies.Metrics.Evaluation(telemetry.KindValidate, caPolicyObj.Name,
 			time.Since(started), countSourceObjects(specificTemplateInjectedObject.Sources))
@@ -166,21 +134,18 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 			Reason:    result.Reason,
 		})
 
-		evaluated++
-
-		decisionFields := []any{
-			"outcome", result.Outcome,
-			"reason", result.Reason,
-			"duration", time.Since(started).String(),
-		}
-		if result.Message != "" {
-			decisionFields = append(decisionFields, "message", result.Message)
-		}
-
-		policyLogger.V(1).Info("policy decision", decisionFields...)
+		telemetry.LogDecision(logger, telemetry.DecisionLine{
+			Policy:    caPolicyObj.Name,
+			Kind:      telemetry.KindValidate,
+			Object:    objectRef,
+			Operation: string(requestObj.Request.Operation),
+			Result:    result.Outcome,
+			Reason:    result.Reason,
+			Message:   result.Message,
+			Err:       result.Err,
+		}, "duration", time.Since(started).String())
 
 		if result.Warning != "" {
-			policyLogger.Info(result.Warning)
 			addWarning(reviewResponse.Response, result.Warning)
 		}
 
@@ -195,15 +160,9 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 		if result.Permissive {
 			addWarning(reviewResponse.Response, fmt.Sprintf(
 				"admitik: policy '%s' is in permissive mode, this object violates it", caPolicyObj.Name))
-			rejections = append(rejections, caPolicyObj.Name)
-			outcome = telemetry.OutcomePermissive
-			message = result.Message
 			continue
 		}
 
-		rejections = append(rejections, caPolicyObj.Name)
-		outcome = telemetry.OutcomeDenied
-		message = result.Message
 		return
 	}
 

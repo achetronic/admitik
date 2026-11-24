@@ -33,7 +33,8 @@ const (
 	KindGenerate Kind = "generate"
 )
 
-// Outcome is what the policy decided
+// Outcome is what the policy decided about the object. It is called 'result' everywhere the
+// engine shows it: in the metrics, in the logs and in the warnings
 type Outcome string
 
 const (
@@ -77,7 +78,7 @@ var (
 	decisions = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "admitik_decisions_total",
 		Help: "Number of decisions taken by each policy.",
-	}, []string{"kind", "policy", "operation", "resource", "outcome", "reason"})
+	}, []string{"kind", "policy", "operation", "resource", "result", "reason"})
 
 	evaluation = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "admitik_evaluation_seconds",

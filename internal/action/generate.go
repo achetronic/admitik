@@ -23,7 +23,6 @@ import (
 	"time"
 
 	//
-	"github.com/go-logr/logr"
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/watch"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -65,27 +64,32 @@ func NewGenerate(dependencies GenerateDependencies) *Generate {
 func (g *Generate) Process(
 	ctx context.Context, resourceType string, eventType watch.EventType, object ...map[string]any) {
 
+	logger := log.FromContext(ctx)
+	operation := common.GetNormalizedOperation(eventType)
 	resource := watchedResourceLabel(resourceType)
-	logger := log.FromContext(ctx).WithValues(
-		"kind", telemetry.KindGenerate,
-		"watched", resource,
-		"operation", common.GetNormalizedOperation(eventType))
 
 	for _, policy := range g.dependencies.Policies.Store.GetResources(resourceType) {
 
-		policyLogger := logger.WithValues("policy", policy.Name)
 		started := time.Now()
 
-		outcome, reason, objects, err := g.generate(ctx, policyLogger, policy, eventType, object)
-		if err != nil {
-			policyLogger.Error(err, "policy decision", "outcome", outcome, "reason", reason)
+		line := telemetry.DecisionLine{
+			Policy:    policy.Name,
+			Kind:      telemetry.KindGenerate,
+			Operation: operation,
 		}
+
+		outcome, reason, objects, err := g.generate(ctx, policy, eventType, object, &line)
+		line.Result = outcome
+		line.Reason = reason
+		line.Err = err
+
+		telemetry.LogDecision(logger, line, "duration", time.Since(started).String())
 
 		g.dependencies.Metrics.Evaluation(telemetry.KindGenerate, policy.Name, time.Since(started), objects)
 		g.dependencies.Metrics.Decision(telemetry.Decision{
 			Kind:      telemetry.KindGenerate,
 			Policy:    policy.Name,
-			Operation: common.GetNormalizedOperation(eventType),
+			Operation: operation,
 			Resource:  resource,
 			Outcome:   outcome,
 			Reason:    reason,
@@ -97,11 +101,14 @@ func (g *Generate) Process(
 // source objects were injected and the error, if any
 func (g *Generate) generate(
 	ctx context.Context,
-	logger logr.Logger,
 	policy *v1alpha1.ClusterGenerationPolicy,
 	eventType watch.EventType,
 	object []map[string]any,
+	line *telemetry.DecisionLine,
 ) (telemetry.Outcome, telemetry.Reason, int, error) {
+
+	// The object that triggered the policy, until something is written
+	line.Object = common.ObjectRefOfObject(object[0])
 
 	data := template.NewInjectedData()
 	data.Operation = common.GetNormalizedOperation(eventType)
@@ -116,10 +123,6 @@ func (g *Generate) generate(
 	}, data)
 
 	sources := countSources(data)
-	if prepared.Err != nil {
-		logger.V(1).Info("the conditions of the policy could not be prepared",
-			"reason", prepared.Reason, "error", prepared.Err.Error())
-	}
 
 	if !prepared.Passed {
 		// A policy whose conditions do not match is not an error, but it is not the same as an
@@ -155,18 +158,14 @@ func (g *Generate) generate(
 			fmt.Errorf("error writing the object of '%s': %w", policy.Name, err)
 	}
 
-	// From here the line describes the generated object, not the one that triggered it
-	logger = logger.WithValues("resource", result.Resource, "name", result.Name, "namespace", result.Namespace)
+	// From here the line is about the object that was written, not the one that triggered it
+	line.Object = common.ObjectRefOfObject(definition)
 
 	if result.Existing {
-		logger.V(1).Info("policy decision",
-			"outcome", telemetry.OutcomeSkipped, "reason", telemetry.ReasonNone,
-			"message", "the object exists and 'overwriteExisting' is disabled")
+		line.Message = "the object exists and 'overwriteExisting' is disabled"
 		return telemetry.OutcomeSkipped, telemetry.ReasonNone, sources, nil
 	}
 
-	logger.Info("policy decision", "outcome", telemetry.OutcomeGenerated, "reason", telemetry.ReasonNone,
-		"created", result.Created)
 	return telemetry.OutcomeGenerated, telemetry.ReasonNone, sources, nil
 }
 

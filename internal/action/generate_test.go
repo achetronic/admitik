@@ -21,8 +21,6 @@ import (
 	"testing"
 
 	//
-	//
-	"github.com/go-logr/logr"
 
 	//
 	corev1 "k8s.io/api/core/v1"
@@ -32,7 +30,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	dynamicFake "k8s.io/client-go/dynamic/fake"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	//
 	"github.com/admitikcore/admitik/api/v1alpha1"
@@ -140,17 +137,22 @@ func watchedObject() map[string]any {
 func TestGenerateWritesTheRenderedObject(t *testing.T) {
 	action := newTestGenerate(t, generationPolicy(generatedConfigMap))
 
-	outcome, reason, _, err := action.generate(context.Background(), testLogger(),
-		generationPolicy(generatedConfigMap), watch.Added, []map[string]any{watchedObject()})
+	line := &telemetry.DecisionLine{}
+	outcome, reason, _, err := action.generate(context.Background(),
+		generationPolicy(generatedConfigMap), watch.Added, []map[string]any{watchedObject()}, line)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if outcome != telemetry.OutcomeGenerated {
-		t.Errorf("got %q as the outcome, expected %q", outcome, telemetry.OutcomeGenerated)
+		t.Errorf("got %q as the result, expected %q", outcome, telemetry.OutcomeGenerated)
 	}
 	if reason != telemetry.ReasonNone {
 		t.Errorf("got %q as the reason, expected %q", reason, telemetry.ReasonNone)
+	}
+	// The line is about the object that was written, not the one that triggered the policy
+	if line.Object.Kind != "ConfigMap" || line.Object.Name != "generated" || line.Object.Namespace != "default" {
+		t.Errorf("got %+v as the object, expected the generated ConfigMap", line.Object)
 	}
 }
 
@@ -158,14 +160,14 @@ func TestGenerateSkipsAnObjectThatAlreadyExists(t *testing.T) {
 	action := newTestGenerate(t, generationPolicy(generatedConfigMap))
 	policy := generationPolicy(generatedConfigMap)
 
-	if _, _, _, err := action.generate(context.Background(), testLogger(), policy,
-		watch.Added, []map[string]any{watchedObject()}); err != nil {
+	if _, _, _, err := action.generate(context.Background(), policy,
+		watch.Added, []map[string]any{watchedObject()}, &telemetry.DecisionLine{}); err != nil {
 		t.Fatalf("unexpected error in the first generation: %v", err)
 	}
 
 	// The second pass finds the object already there and 'overwriteExisting' is disabled
-	outcome, reason, _, err := action.generate(context.Background(), testLogger(), policy,
-		watch.Added, []map[string]any{watchedObject()})
+	outcome, reason, _, err := action.generate(context.Background(), policy,
+		watch.Added, []map[string]any{watchedObject()}, &telemetry.DecisionLine{})
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -188,17 +190,22 @@ func TestGenerateSkipsAPolicyWhoseConditionsAreNotMet(t *testing.T) {
 
 	action := newTestGenerate(t, policy)
 
-	outcome, reason, _, err := action.generate(context.Background(), testLogger(), policy,
-		watch.Added, []map[string]any{watchedObject()})
+	line := &telemetry.DecisionLine{}
+	outcome, reason, _, err := action.generate(context.Background(), policy,
+		watch.Added, []map[string]any{watchedObject()}, line)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if outcome != telemetry.OutcomeSkipped {
-		t.Errorf("got %q as the outcome, expected %q", outcome, telemetry.OutcomeSkipped)
+		t.Errorf("got %q as the result, expected %q", outcome, telemetry.OutcomeSkipped)
 	}
 	if reason != telemetry.ReasonConditions {
 		t.Errorf("got %q as the reason, expected %q", reason, telemetry.ReasonConditions)
+	}
+	// Nothing was written, so the line stays about the object that triggered the policy
+	if line.Object.Kind != "Namespace" || line.Object.Name != "demo" {
+		t.Errorf("got %+v as the object, expected the watched Namespace", line.Object)
 	}
 }
 
@@ -207,8 +214,8 @@ func TestGenerateFailsWhenTheRenderedObjectIsNotYAML(t *testing.T) {
 
 	action := newTestGenerate(t, policy)
 
-	outcome, reason, _, err := action.generate(context.Background(), testLogger(), policy,
-		watch.Added, []map[string]any{watchedObject()})
+	outcome, reason, _, err := action.generate(context.Background(), policy,
+		watch.Added, []map[string]any{watchedObject()}, &telemetry.DecisionLine{})
 
 	if err == nil {
 		t.Fatal("expected an error")
@@ -233,8 +240,4 @@ func TestWatchedResourceLabel(t *testing.T) {
 			t.Errorf("got %q for %q, expected %q", got, watched, expected)
 		}
 	}
-}
-
-func testLogger() logr.Logger {
-	return log.Log
 }
