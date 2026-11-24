@@ -32,17 +32,3 @@ They are described in the following table:
 
 > The flags of the logger are bound by controller-runtime, so `--zap-log-level` and the rest are
 > also available.
-
-## Metrics
-
-The metrics endpoint is disabled by default. Enable it with `--metrics-bind-address=:8080` and read
-these series:
-
-| Metric | Labels | What it says |
-|:---|:---|:---|
-| `admitik_decisions_total` | `kind`, `policy`, `operation`, `resource`, `outcome`, `reason` | What each policy decided |
-| `admitik_evaluation_seconds` | `kind`, `policy` | How long one policy took with one object |
-| `admitik_injected_objects` | `kind`, `policy` | How many source objects were injected in one evaluation |
-
-`reason` is a closed set: `none`, `sources`, `conditions`, `template` or `patch`. It says which step
-degraded, so the error itself stays in the logs.
