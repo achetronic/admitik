@@ -47,6 +47,15 @@ help: ## Display this help.
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
+.PHONY: chart-crds
+chart-crds: ## Copy the generated CRDs into the chart.
+	cp config/crd/bases/*.yaml charts/admitik/crds/
+
+.PHONY: verify-chart
+verify-chart: manifests generate chart-crds ## Fail when the generated files or the chart are out of date.
+	@git diff --exit-code -- config/crd/bases charts/admitik/crds api/v1alpha1 \
+		|| (echo ""; echo "Generated files are out of date. Run 'make manifests generate chart-crds' and commit the result."; exit 1)
+
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
@@ -195,7 +204,7 @@ CADDY = $(LOCALBIN)/caddy-$(CADDY_VERSION)
 KUSTOMIZE_VERSION ?= v5.4.1
 CONTROLLER_TOOLS_VERSION ?= v0.15.0
 ENVTEST_VERSION ?= release-0.18
-GOLANGCI_LINT_VERSION ?= v1.57.2
+GOLANGCI_LINT_VERSION ?= v1.64.8
 CADDY_VERSION ?= v2.10.0
 
 .PHONY: kustomize

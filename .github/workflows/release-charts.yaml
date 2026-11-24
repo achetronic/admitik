@@ -30,6 +30,25 @@ jobs:
         with:
           token: "${{ secrets.GITHUB_TOKEN }}"
 
+      - name: Check the release tag matches the chart
+        if: github.event_name == 'release'
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(awk '/^version:/ {print $2}' charts/admitik/Chart.yaml)"
+          app_version="$(awk '/^appVersion:/ {gsub(/"/, "", $2); print $2}' charts/admitik/Chart.yaml)"
+
+          if [ "${version}" != "${tag}" ] || [ "${app_version}" != "${tag}" ]; then
+            echo "The release is ${tag} but the chart says version ${version} and appVersion ${app_version}" >&2
+            exit 1
+          fi
+
+      - name: Check the chart CRDs are the generated ones
+        run: |
+          if ! diff -r config/crd/bases charts/admitik/crds; then
+            echo "The CRDs of the chart differ from config/crd/bases. Run 'make chart-crds' and commit the result." >&2
+            exit 1
+          fi
+
       - name: Run chart-releaser
         uses: helm/chart-releaser-action@v1.6.0
         with:
