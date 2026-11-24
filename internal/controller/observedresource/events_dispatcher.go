@@ -16,10 +16,8 @@ limitations under the License.
 package observedresource
 
 import (
-	"fmt"
-	"time"
-
 	//
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/watch"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -41,6 +39,7 @@ type EventDispatcherDependencies struct {
 	//
 	ClusterGenerationPolicyRegistry *policyStore.PolicyStore[*v1alpha1.ClusterGenerationPolicy]
 	Evaluator                       *evaluator.Evaluator
+	RESTMapper                      meta.RESTMapper
 	ResourceObserverRegistry        *resourceObserverRegistry.ResourceObserverRegistry
 	Engines                         *template.Registry
 }
@@ -49,8 +48,7 @@ type EventDispatcher struct {
 	dependencies EventDispatcherDependencies
 
 	// Carried stuff
-	processors         map[string]Processor
-	availableResources availableResources
+	processors map[string]Processor
 }
 
 // NewEventDispatcher TODO
@@ -60,35 +58,10 @@ func NewEventDispatcher(deps EventDispatcherDependencies) *EventDispatcher {
 		dependencies: deps,
 	}
 
-	// Start syncer for available resources in Kubernetes
-	go evDispatcher.syncKubeAvailableResources()
-
 	//
 	evDispatcher.processors = evDispatcher.getInitializedProcessors()
 
 	return evDispatcher
-}
-
-// syncKubeAvailableResources TODO
-// This function is intended to be used as goroutine
-func (d *EventDispatcher) syncKubeAvailableResources() {
-	logger := log.FromContext(globals.Application.Context).WithValues("controller", controllerName)
-
-	logger.Info("Starting Worker", "worker", "KubeAvailableResourcesSyncer")
-
-	for {
-		resources, err := fetchKubeAvailableResources()
-
-		if err != nil {
-			logger.Info(fmt.Sprintf("Failed fetching Kubernetes available resources list: %v", err.Error()))
-			goto takeANap
-		}
-
-		d.availableResources.replace(resources)
-
-	takeANap:
-		time.Sleep(5 * time.Second)
-	}
 }
 
 // getInitializedProcessors return a map with all the processors indexed by type
@@ -101,7 +74,7 @@ func (d *EventDispatcher) getInitializedProcessors() (processorsMap map[string]P
 		ClusterGenerationPolicyRegistry: d.dependencies.ClusterGenerationPolicyRegistry,
 		Evaluator:                       d.dependencies.Evaluator,
 		Engines:                         d.dependencies.Engines,
-		AvailableResources:              &d.availableResources,
+		RESTMapper:                      d.dependencies.RESTMapper,
 	})
 
 	processorsMap = processors

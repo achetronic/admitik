@@ -22,6 +22,7 @@ import (
 
 	//
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -44,7 +45,8 @@ type GenerationProcessorDependencies struct {
 	Engines                         *template.Registry
 
 	//
-	AvailableResources *availableResources
+	// RESTMapper resolves the resource of the kind the template rendered
+	RESTMapper meta.RESTMapper
 }
 
 type GenerationProcessor struct {
@@ -106,6 +108,8 @@ func (p *GenerationProcessor) Process(resourceType string, eventType watch.Event
 		var resultObjectBasicData globals.ObjectBasicData
 
 		var resultObjConverted *unstructured.Unstructured
+		var resultMapping *meta.RESTMapping
+		var resultMappingErr error
 		var tmpResource string
 		var tmpGvrnn *v1alpha1.ResourceGroupT
 		var resourceClient dynamic.ResourceInterface
@@ -139,11 +143,17 @@ func (p *GenerationProcessor) Process(resourceType string, eventType watch.Event
 		}
 
 		// Craft a metadata object for client-go to perform actions
-		tmpResource = getResourceFromGvk(p.dependencies.AvailableResources, schema.GroupVersionKind{
-			Group:   resultObjectBasicData.Group,
-			Version: resultObjectBasicData.Version,
-			Kind:    resultObjectBasicData.Kind,
-		})
+		resultMapping, resultMappingErr = p.dependencies.RESTMapper.RESTMapping(
+			schema.GroupKind{Group: resultObjectBasicData.Group, Kind: resultObjectBasicData.Kind},
+			resultObjectBasicData.Version,
+		)
+		if resultMappingErr != nil {
+			logger.Info(fmt.Sprintf("failed obtaining the resource of the rendered kind: %s", resultMappingErr.Error()))
+			kubeEventMessage = "Unknown object resource for provided GVK. More info in controller logs."
+			goto createKubeEvent
+		}
+
+		tmpResource = resultMapping.Resource.Resource
 
 		if tmpResource == "" {
 			logger.Info("failed obtaining resource equivalent from Kubernetes for provided GVK. Is this resource defined?")

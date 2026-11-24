@@ -24,6 +24,7 @@ import (
 	"time"
 
 	//
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
@@ -80,6 +81,9 @@ type ObservedResourceControllerDependencies struct {
 
 	// Evaluator prepares the context of the policies and checks their conditions
 	Evaluator *evaluator.Evaluator
+
+	// RESTMapper resolves the resource of the kind a template rendered
+	RESTMapper meta.RESTMapper
 }
 
 // ObservedResourceController represents the controller that triggers parallel threads.
@@ -137,6 +141,7 @@ func (r *ObservedResourceController) Start(ctx context.Context) error {
 		ResourceObserverRegistry:        r.Dependencies.ResourceObserverRegistry,
 		Engines:                         r.Dependencies.Engines,
 		Evaluator:                       r.Dependencies.Evaluator,
+		RESTMapper:                      r.Dependencies.RESTMapper,
 	})
 
 	ticker := time.NewTicker(secondsToReconcileInformersAgain)

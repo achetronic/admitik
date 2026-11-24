@@ -496,6 +496,7 @@ func main() {
 			ResourceObserverRegistry:        resourceObserverReg,
 			Engines:                         engines,
 			Evaluator:                       policyEvaluator,
+			RESTMapper:                      mgr.GetRESTMapper(),
 		},
 	}
 	if err = mgr.Add(&observedResourceController); err != nil {
