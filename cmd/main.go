@@ -28,6 +28,7 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	"go.uber.org/zap/zapcore"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -166,9 +167,11 @@ func main() {
 
 	// Ref: https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/log/zap@v0.21.0#Options.BindFlags
 	// Production by default: JSON at info level, which is what a log pipeline reads.
-	// '--zap-devel' switches to the console encoder and the debug level
+	// '--zap-devel' switches to the console encoder and the debug level.
+	// Only a fatal error carries a stack trace: the errors of the policies already say why
 	opts := zap.Options{
-		Development: false,
+		Development:     false,
+		StacktraceLevel: zapcore.FatalLevel,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
