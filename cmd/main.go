@@ -17,20 +17,17 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
+	"net/http"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
-	corev1 "k8s.io/api/core/v1"
-	apimacherrors "k8s.io/apimachinery/pkg/api/errors"
-	apimachv1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -42,20 +39,28 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	//
-	"github.com/freepik-company/admitik/api/v1alpha1"
-	"github.com/freepik-company/admitik/internal/certificates"
-	"github.com/freepik-company/admitik/internal/controller"
-	"github.com/freepik-company/admitik/internal/controller/clustergenerationpolicy"
-	"github.com/freepik-company/admitik/internal/controller/clustermutationpolicy"
-	"github.com/freepik-company/admitik/internal/controller/clustervalidationpolicy"
-	"github.com/freepik-company/admitik/internal/controller/observedresource"
-	"github.com/freepik-company/admitik/internal/controller/sources"
-	"github.com/freepik-company/admitik/internal/globals"
-	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
-	resourceInformerRegistry "github.com/freepik-company/admitik/internal/registry/resourceinformer"
-	resourceObserverRegistry "github.com/freepik-company/admitik/internal/registry/resourceobserver"
-	sourcesRegistry "github.com/freepik-company/admitik/internal/registry/sources"
-	"github.com/freepik-company/admitik/internal/server/admission"
+	"github.com/admitikcore/admitik/api/v1alpha1"
+	"github.com/admitikcore/admitik/internal/action"
+	"github.com/admitikcore/admitik/internal/audit"
+	"github.com/admitikcore/admitik/internal/cascade"
+	"github.com/admitikcore/admitik/internal/controller"
+	"github.com/admitikcore/admitik/internal/controller/background"
+	"github.com/admitikcore/admitik/internal/controller/clustergenerationpolicy"
+	"github.com/admitikcore/admitik/internal/controller/clustermutationpolicy"
+	"github.com/admitikcore/admitik/internal/controller/clustervalidationpolicy"
+	"github.com/admitikcore/admitik/internal/controller/sources"
+	"github.com/admitikcore/admitik/internal/evaluator"
+	"github.com/admitikcore/admitik/internal/globals"
+	"github.com/admitikcore/admitik/internal/informer"
+	"github.com/admitikcore/admitik/internal/kubeapply"
+	policyStore "github.com/admitikcore/admitik/internal/policystore"
+	"github.com/admitikcore/admitik/internal/server/admission"
+	"github.com/admitikcore/admitik/internal/telemetry"
+	"github.com/admitikcore/admitik/internal/template"
+	"github.com/admitikcore/admitik/internal/template/cel"
+	"github.com/admitikcore/admitik/internal/template/gotmpl"
+	"github.com/admitikcore/admitik/internal/template/plain"
+	"github.com/admitikcore/admitik/internal/template/starlark"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -102,6 +107,8 @@ func main() {
 	var enableSpecialLabels bool
 	var excludeAdmissionSelfNamespace bool
 	var excludedAdmissionNamespaces string
+
+	var auditInterval time.Duration
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metric endpoint binds to. "+
 		"Use the port :8080. If not set, it will be 0 in order to disable the metrics server")
@@ -153,6 +160,9 @@ func main() {
 		"Exclude Admitik resources from admission evaluations")
 	flag.StringVar(&excludedAdmissionNamespaces, "excluded-admission-namespaces", "",
 		"Comma-separated list of namespaces to be excluded from admission evaluations. Commonly used for 'kube-system'")
+
+	flag.DurationVar(&auditInterval, "audit-interval", 0,
+		"Interval between compliance scans over the objects that already exist. Zero disables them")
 
 	// Ref: https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/log/zap@v0.21.0#Options.BindFlags
 	opts := zap.Options{
@@ -225,110 +235,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	///////////////////////////////////
-	// Get/Generate certificates needed by admission webhooks server
-	// TODO: Extract this entire block to a different function
-	var ca, cert, privKey string
-
-	if (webhooksServerCA != "" || webhooksServerCertificate != "" || webhooksServerPrivateKey != "") &&
-		(webhooksServerCertsSecretName != "") {
-		setupLog.Error(err, "getting certificates from files and from Secret objects are mutually exclusive")
+	// The webhook server needs a certificate: the user can give it as files, as a Secret, or let
+	// Admitik generate one when the Secret does not exist
+	webhooksServerCA, webhooksServerCertificate, webhooksServerPrivateKey, err = setupCertificates(certificateOptions{
+		CAFile:          webhooksServerCA,
+		CertificateFile: webhooksServerCertificate,
+		PrivateKeyFile:  webhooksServerPrivateKey,
+		SecretName:      webhooksServerCertsSecretName,
+		Namespace:       currentNamespace,
+		Autogenerate:    webhooksServerAutogenerateCerts,
+		Hostname:        webhooksClientHostname,
+	})
+	if err != nil {
+		setupLog.Error(err, "unable to set up the certificates of the webhook server")
 		os.Exit(1)
 	}
-
-	if webhooksServerCertsSecretName != "" {
-
-		succeededProcess := false
-		for try := 0; try < 3; try++ {
-
-			secretObj := &corev1.Secret{}
-			secretObj, err = globals.Application.KubeRawCoreClient.CoreV1().Secrets(currentNamespace).
-				Get(globals.Application.Context, webhooksServerCertsSecretName, apimachv1.GetOptions{})
-
-			if err != nil {
-				if !apimacherrors.IsNotFound(err) {
-					setupLog.Error(err, "unable to get secret with certificates")
-					continue
-				}
-
-				if apimacherrors.IsNotFound(err) && !webhooksServerAutogenerateCerts {
-					setupLog.Error(err, "unable to get secret and autogeneration is disabled")
-					continue
-				}
-
-				dnsNames := []string{"localhost", webhooksClientHostname}
-				if strings.HasSuffix(webhooksClientHostname, ".cluster.local") {
-					dnsNames = append(dnsNames, strings.TrimSuffix(webhooksClientHostname, ".cluster.local"))
-				}
-				if strings.HasSuffix(webhooksClientHostname, ".svc") {
-					dnsNames = append(dnsNames, webhooksClientHostname+".cluster.local")
-				}
-				ca, cert, privKey, err = certificates.GenerateCerts(dnsNames)
-
-				if err != nil {
-					setupLog.Error(err, "unable to generate self-signed certificates")
-					continue
-				}
-
-				secretObj.StringData = map[string]string{
-					"ca.crt":  ca,
-					"tls.crt": cert,
-					"tls.key": privKey,
-				}
-
-				secretObj.Name = webhooksServerCertsSecretName
-				_, err = globals.Application.KubeRawCoreClient.CoreV1().Secrets(currentNamespace).
-					Create(globals.Application.Context, secretObj, apimachv1.CreateOptions{})
-				if err != nil {
-					setupLog.Error(err, "unable to create secret with self-signed certificates")
-					continue
-				}
-
-				succeededProcess = true
-				break
-			}
-
-			caBytes, dataFound := secretObj.Data["ca.crt"]
-			if !dataFound {
-				setupLog.Error(err, "unable to get ca.crt from defined secret")
-				os.Exit(1)
-			}
-			ca = string(caBytes)
-
-			certBytes, dataFound := secretObj.Data["tls.crt"]
-			if !dataFound {
-				setupLog.Error(err, "unable to get tls.crt from defined secret")
-				os.Exit(1)
-			}
-			cert = string(certBytes)
-
-			privKeyBytes, dataFound := secretObj.Data["tls.key"]
-			if !dataFound {
-				setupLog.Error(err, "unable to get tls.key from defined secret")
-				os.Exit(1)
-			}
-			privKey = string(privKeyBytes)
-
-			succeededProcess = true
-			break
-		}
-
-		if !succeededProcess {
-			setupLog.Error(err, "unable to get self-signed certificates")
-			os.Exit(1)
-		}
-
-		tempDir := os.TempDir()
-		webhooksServerCA = filepath.Join(tempDir, "ca.crt")
-		os.WriteFile(webhooksServerCA, []byte(ca), 0744)
-
-		webhooksServerCertificate = filepath.Join(tempDir, "tls.crt")
-		os.WriteFile(webhooksServerCertificate, []byte(cert), 0744)
-
-		webhooksServerPrivateKey = filepath.Join(tempDir, "tls.key")
-		os.WriteFile(webhooksServerPrivateKey, []byte(privKey), 0744)
-	}
-	//////////////////////////////////
 
 	// Load the CA bundle if defined
 	caBundleBytes := []byte{}
@@ -357,13 +278,37 @@ func main() {
 		admission.AdmissionServerValidationPath,
 		admission.AdmissionServerMutationPath)
 
+	// Create the template engines that will be used to render conditions, patches and generated objects
+	engines, err := newEngines()
+	if err != nil {
+		setupLog.Error(err, "unable to set up template engines")
+		os.Exit(1)
+	}
+
+	// Metrics about what the policies decide. They are served by the metrics endpoint
+	telemetryRecorder := telemetry.NewRecorder()
+
 	// Create registries managers that will be used by several controllers
 	clusterValidationPolicyReg := policyStore.NewPolicyStore[*v1alpha1.ClusterValidationPolicy]()
 	clusterMutationPolicyReg := policyStore.NewPolicyStore[*v1alpha1.ClusterMutationPolicy]()
 	clusterGenerationPolicyReg := policyStore.NewPolicyStore[*v1alpha1.ClusterGenerationPolicy]()
-	sourcesReg := sourcesRegistry.NewSourcesRegistry()
-	resourceObserverReg := resourceObserverRegistry.NewResourceObserverRegistry()
-	resourceInformerReg := resourceInformerRegistry.NewResourceInformerRegistry()
+
+	// One pool of informers shared by every controller: a resource type is watched once per pod
+	informersPool := informer.NewPool(
+		&globals.Application.Context,
+		globals.Application.KubeRawClient,
+		sourcesTimeToResyncInformers)
+
+	// Evaluator used by every policy type to prepare its context and check its conditions
+	policyEvaluator := evaluator.New(engines, informersPool)
+
+	// Action that renders and writes the objects of the ClusterGenerationPolicy resources
+	generateAction := action.NewGenerate(action.GenerateDependencies{
+		Policies:  clusterGenerationPolicyReg,
+		Evaluator: policyEvaluator,
+		Engines:   engines,
+		Writer:    kubeapply.NewWriter(globals.Application.KubeRawClient, mgr.GetRESTMapper()),
+	})
 
 	// Init internal registries controllers
 	// Following controllers manage internal registries for user-facing resources.
@@ -376,13 +321,15 @@ func main() {
 		Options: clustergenerationpolicy.ClusterGenerationPolicyControllerOptions{},
 		Dependencies: clustergenerationpolicy.ClusterGenerationPolicyControllerDependencies{
 			ClusterGenerationPolicyRegistry: clusterGenerationPolicyReg,
+			Cascade: cascade.New(globals.Application.KubeRawClient,
+				globals.Application.KubeDiscoveryClient),
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ClusterGenerationPolicy")
 		os.Exit(1)
 	}
 
-	if err = (&clustermutationpolicy.ClusterMutationPolicyReconciler{
+	mutationPolicyReconciler := &clustermutationpolicy.ClusterMutationPolicyReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 
@@ -394,16 +341,18 @@ func main() {
 
 			WebhookClientConfig: webhookClientConfigMutation,
 			WebhookTimeout:      webhooksClientTimeout,
+			Elected:             mgr.Elected(),
 		},
 		Dependencies: clustermutationpolicy.ClusterMutationPolicyControllerDependencies{
 			ClusterMutationPolicyRegistry: clusterMutationPolicyReg,
 		},
-	}).SetupWithManager(mgr); err != nil {
+	}
+	if err = mutationPolicyReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ClusterMutationPolicy")
 		os.Exit(1)
 	}
 
-	if err = (&clustervalidationpolicy.ClusterValidationPolicyReconciler{
+	validationPolicyReconciler := &clustervalidationpolicy.ClusterValidationPolicyReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 
@@ -415,36 +364,53 @@ func main() {
 
 			WebhookClientConfig: webhookClientConfigValidation,
 			WebhookTimeout:      webhooksClientTimeout,
+			Elected:             mgr.Elected(),
 		},
 		Dependencies: clustervalidationpolicy.ClusterValidationPolicyControllerDependencies{
 			ClusterValidationPolicyRegistry: clusterValidationPolicyReg,
 		},
-	}).SetupWithManager(mgr); err != nil {
+	}
+	if err = validationPolicyReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ClusterValidationPolicy")
+		os.Exit(1)
+	}
+
+	// The webhook configurations are only written by the leader, so a replica that takes over has
+	// to write them with the policies this replica already knows about
+	if err = mgr.Add(controller.ElectionRefresh{
+		Name: "webhook-configurations",
+		Refresh: func(ctx context.Context) error {
+			if err := mutationPolicyReconciler.SyncWebhookConfiguration(ctx); err != nil {
+				return err
+			}
+
+			return validationPolicyReconciler.SyncWebhookConfiguration(ctx)
+		},
+	}); err != nil {
+		setupLog.Error(err, "failed adding the webhook refresh to the manager")
 		os.Exit(1)
 	}
 
 	// +kubebuilder:scaffold:builder
 
-	// Init ObservedResourceController.
-	// This controller launches watchers for resource types expressed in 'watchedResources' section of some CRs,
-	// and executes suitable processors for them.
-	// This is used in resources such as ClusterGenerationPolicy, ClusterCleanPolicy, etc.
-	observedResourceController := observedresource.ObservedResourceController{
-		Client: mgr.GetClient(),
-		Options: observedresource.ObservedResourceControllerOptions{
+	// Init BackgroundController.
+	// It watches the resources expressed in the 'watchedResources' section of the policies and hands
+	// their events to the actions that asked for them
+	backgroundController := background.Controller{
+		Options: background.Options{
 			InformerDurationToResync: sourcesTimeToResyncInformers,
 		},
-		Dependencies: observedresource.ObservedResourceControllerDependencies{
+		Dependencies: background.Dependencies{
 			Context:                         &globals.Application.Context,
 			ClusterGenerationPolicyRegistry: clusterGenerationPolicyReg,
-			SourcesRegistry:                 sourcesReg,
-			ResourceInformerRegistry:        resourceInformerReg,
-			ResourceObserverRegistry:        resourceObserverReg,
+			Pool:                            informersPool,
+			Processors: map[string]background.Processor{
+				background.ObserverTypeClusterGenerationPolicies: generateAction,
+			},
 		},
 	}
-	if err = mgr.Add(&observedResourceController); err != nil {
-		setupLog.Error(err, "failed adding observed resources controller to manager")
+	if err = mgr.Add(&backgroundController); err != nil {
+		setupLog.Error(err, "failed adding the background controller to the manager")
 		os.Exit(1)
 	}
 
@@ -454,16 +420,20 @@ func main() {
 	// such as AdmissionServer or BackgroundController.
 	// IMPORTANT: All the replicas are able to process and leader is not chosen for this.
 	sourcesController := sources.SourcesController{
-		Client: mgr.GetClient(),
 		Options: sources.SourcesControllerOptions{
 			InformerDurationToResync: sourcesTimeToResyncInformers,
 		},
 		Dependencies: sources.SourcesControllerDependencies{
-			Context:                         &globals.Application.Context,
-			ClusterGenerationPolicyRegistry: clusterGenerationPolicyReg,
-			ClusterMutationPolicyRegistry:   clusterMutationPolicyReg,
-			ClusterValidationPolicyRegistry: clusterValidationPolicyReg,
-			SourcesRegistry:                 sourcesReg,
+			Context: &globals.Application.Context,
+
+			// Every policy store whose 'sources' section must be watched. Add new policy types here
+			PolicyStores: []policyStore.SourceProvider{
+				clusterGenerationPolicyReg,
+				clusterMutationPolicyReg,
+				clusterValidationPolicyReg,
+			},
+
+			Pool: informersPool,
 		},
 	}
 	if err = mgr.Add(&sourcesController); err != nil {
@@ -486,13 +456,30 @@ func main() {
 		},
 		admission.AdmissionServerDependencies{
 			Context:                         &globals.Application.Context,
-			SourcesRegistry:                 sourcesReg,
 			ClusterValidationPolicyRegistry: clusterValidationPolicyReg,
 			ClusterMutationPolicyRegistry:   clusterMutationPolicyReg,
+			Evaluator:                       policyEvaluator,
+			Engines:                         engines,
+			Metrics:                         telemetryRecorder,
 		})
 	if err = mgr.Add(admissionServer); err != nil {
 		setupLog.Error(err, "failed adding admission server controller to manager")
 		os.Exit(1)
+	}
+
+	// Init the compliance scans. They evaluate the validation policies over the existing objects
+	// and write one aggregated report. Disabled when the interval is zero
+	if auditInterval > 0 {
+		auditScanner := audit.NewScanner(audit.ScannerOptions{}, audit.ScannerDependencies{
+			Client:    mgr.GetClient(),
+			Dynamic:   globals.Application.KubeRawClient,
+			Evaluator: policyEvaluator,
+		})
+
+		if err = mgr.Add(audit.Runner{Interval: auditInterval, Scanner: auditScanner}); err != nil {
+			setupLog.Error(err, "failed adding the audit scanner to the manager")
+			os.Exit(1)
+		}
 	}
 
 	//
@@ -500,7 +487,11 @@ func main() {
 		setupLog.Error(err, "unable to set up health check")
 		os.Exit(1)
 	}
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+	// A replica that has not synced its caches would evaluate the policies with empty sources,
+	// so it must not receive admission requests yet
+	if err := mgr.AddReadyzCheck("readyz", func(_ *http.Request) error {
+		return sourcesController.Ready()
+	}); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}
@@ -511,4 +502,21 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// newEngines builds the registry with every available template engine
+func newEngines() (*template.Registry, error) {
+
+	celExpression, err := cel.NewExpression()
+	if err != nil {
+		return nil, err
+	}
+
+	return template.NewRegistry(
+		celExpression,
+		cel.NewPlaceholders(celExpression),
+		gotmpl.New(),
+		starlark.New(),
+		plain.New(),
+	), nil
 }

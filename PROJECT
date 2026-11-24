@@ -6,7 +6,7 @@ domain: admitik.dev
 layout:
 - go.kubebuilder.io/v4
 projectName: admitik
-repo: github.com/freepik-company/admitik
+repo: github.com/admitikcore/admitik
 resources:
 - api:
     crdVersion: v1
@@ -14,7 +14,7 @@ resources:
   controller: true
   domain: admitik.dev
   kind: ClusterValidationPolicy
-  path: github.com/freepik-company/admitik/api/v1alpha1
+  path: github.com/admitikcore/admitik/api/v1alpha1
   version: v1alpha1
 - api:
     crdVersion: v1
@@ -22,7 +22,7 @@ resources:
   controller: true
   domain: admitik.dev
   kind: ClusterMutationPolicy
-  path: github.com/freepik-company/admitik/api/v1alpha1
+  path: github.com/admitikcore/admitik/api/v1alpha1
   version: v1alpha1
 - api:
     crdVersion: v1
@@ -30,6 +30,6 @@ resources:
   controller: true
   domain: admitik.dev
   kind: ClusterGenerationPolicy
-  path: github.com/freepik-company/admitik/api/v1alpha1
+  path: github.com/admitikcore/admitik/api/v1alpha1
   version: v1alpha1
 version: "3"

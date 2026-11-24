@@ -1,11 +1,13 @@
 # How to develop
 
 ### Prerequisites
-- Kubebuilder v4.0.0+
-- go version v1.22.0+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
+- go version v1.24.2+, the one in `go.mod`
+- docker version 17.03+
+- kubectl
+- Access to a Kubernetes cluster. [Kind](https://kind.sigs.k8s.io/) is enough
+
+The tools the project needs (`controller-gen`, `kustomize`, `golangci-lint`, `setup-envtest`) are
+downloaded into `bin/` by the Makefile the first time they are used.
 
 ### The process
 
@@ -42,6 +44,27 @@ kubectl apply -k ./docs/samples/
 > kubectl CLI is pointing to
 
 
+## Before sending a change
+
+```console
+make test    # runs the unit tests with the race detector
+make lint    # runs the linter
+```
+
+If you touch anything under `api/`, regenerate the CRDs and the deepcopy code, and copy the CRDs
+into the chart:
+
+```console
+make manifests generate
+cp config/crd/bases/*.yaml charts/admitik/crds/
+```
+
+`make manifests` writes the CRDs, the RBAC and the webhook manifests. `make generate` writes
+`zz_generated.deepcopy.go`. Running them twice must produce no changes.
+
+> `controller-gen` v0.15 does not build with new versions of Go. Set `GOTOOLCHAIN=go1.23.x` if the
+> download fails.
+
 ## How releases are created
 
 Each release of this operator is done following several steps carefully in order not to break the things for anyone.
@@ -61,7 +84,7 @@ the process, the steps are described in the following recipe:
 
     ```console
     export VERSION="0.0.1"
-    export IMG="ghcr.io/freepik-company/admitik:v$VERSION"
+    export IMG="ghcr.io/admitikcore/admitik:v$VERSION"
     ```
 
 3. Generate and push the Docker image (published on Docker Hub).

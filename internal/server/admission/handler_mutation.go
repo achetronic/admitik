@@ -22,23 +22,23 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	//
 	jsonpatch "github.com/evanphx/json-patch/v5"
 	"github.com/wI2L/jsondiff"
 	admissionv1 "k8s.io/api/admission/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/yaml"
 
 	//
-	"github.com/freepik-company/admitik/api/v1alpha1"
-	"github.com/freepik-company/admitik/internal/common"
-	"github.com/freepik-company/admitik/internal/globals"
-	"github.com/freepik-company/admitik/internal/template"
+	"github.com/admitikcore/admitik/api/v1alpha1"
+	"github.com/admitikcore/admitik/internal/evaluator"
+	"github.com/admitikcore/admitik/internal/globals"
+	"github.com/admitikcore/admitik/internal/telemetry"
+	"github.com/admitikcore/admitik/internal/template"
 )
 
 // handleRequest handles the incoming requests
@@ -109,91 +109,158 @@ func (s *HttpServer) handleMutationRequest(response http.ResponseWriter, request
 
 	// Create an object that will be injected in conditions/message
 	// in later template evaluation stage
-	commonTemplateInjectedObject := template.PolicyEvaluationDataT{}
-	commonTemplateInjectedObject.Initialize()
+	commonTemplateInjectedObject := template.NewInjectedData()
 
 	// Store data for later: operation, old+current object
-	err = s.populatePolicyDataFromAdmission(&requestObj, &commonTemplateInjectedObject)
+	err = s.populatePolicyDataFromAdmission(&requestObj, commonTemplateInjectedObject)
 	if err != nil {
 		logger.Info(fmt.Sprintf("failed extracting data from AdmissionReview: %s", err.Error()))
 		return
 	}
 
-	// Loop over ClusterMutationPolicy objects collecting the patches to apply
+	// Loop over ClusterMutationPolicy objects collecting the patches to apply.
+	// Patches are calculated incrementally, applying patched over the previous patched object.
 	// At this point, some extra params will be added to the object that will be injected in template
 	jsonPatchOperations := jsondiff.Patch{}
+	patchedObjectBytes := requestObj.Request.Object.Raw
 
-	cmPolicyList := s.dependencies.ClusterMutationPolicyRegistry.GetResources(resourcePattern)
+	cmPolicyList := s.dependencies.ClusterMutationPolicyRegistry.Store.GetResources(resourcePattern)
 	for _, cmPolicyObj := range cmPolicyList {
 
 		// Automatically add some information to the logs
-		logger = logger.WithValues("ClusterMutationPolicy", cmPolicyObj.Name)
+		policyLogger := logger.WithValues("ClusterMutationPolicy", cmPolicyObj.Name)
+		started := time.Now()
 
-		// Retrieve the sources declared per policy
-		triggerInjectedObject := commonTemplateInjectedObject.TriggerInjectedDataT
-		tmpFetchedPolicySources, fetchErr := common.FetchPolicySources(s.dependencies.SourcesRegistry, cmPolicyObj, &triggerInjectedObject)
-		if fetchErr != nil {
-			logger.Info("failed fetching sources. Broken ones will be empty", "error", fetchErr.Error())
+		specificTemplateInjectedObject := *commonTemplateInjectedObject
+		prepared := s.dependencies.Evaluator.Prepare(evaluator.Request{
+			Policy:     cmPolicyObj,
+			Conditions: cmPolicyObj.Spec.Conditions,
+		}, &specificTemplateInjectedObject)
+
+		result := s.mutateWith(cmPolicyObj, &specificTemplateInjectedObject, patchedObjectBytes, prepared)
+		if result.Err != nil {
+			policyLogger.Info("policy could not be applied", "reason", result.Reason, "error", result.Err.Error())
 		}
 
-		specificTemplateInjectedObject := commonTemplateInjectedObject
-		specificTemplateInjectedObject.Sources = tmpFetchedPolicySources
+		s.dependencies.Metrics.Evaluation(telemetry.KindMutate, cmPolicyObj.Name,
+			time.Since(started), countSourceObjects(specificTemplateInjectedObject.Sources))
+		s.dependencies.Metrics.Decision(telemetry.Decision{
+			Kind:      telemetry.KindMutate,
+			Policy:    cmPolicyObj.Name,
+			Operation: string(requestObj.Request.Operation),
+			Resource:  resourceID(requestObj.Request.Resource),
+			Outcome:   result.Outcome,
+			Reason:    result.Reason,
+		})
 
-		// Evaluate template conditions
-		conditionsPassed, condErr := common.IsPassingConditions(cmPolicyObj.Spec.Conditions, &specificTemplateInjectedObject)
-		if condErr != nil {
-			logger.Info("failed evaluating conditions", "error", condErr.Error())
+		if result.Warning != "" {
+			policyLogger.Info(result.Warning)
+			addWarning(reviewResponse.Response, result.Warning)
 		}
 
-		// Conditions are not met, skip patching the resource
-		if !conditionsPassed {
-			// TODO: Should we log, or throw an event, when conditions are not met?
+		// Conditions are not met or the patch failed, keep the object as it was
+		if result.Outcome != telemetry.OutcomePatched {
 			continue
 		}
 
-		// When some condition is not met, evaluate patch's template and emit a response
-		var kubeEventAction string = "MutationAborted"
-		var kubeEventMessage string
-
-		var parsedPatch string
-		var tmpJsonPatchOperations jsondiff.Patch
-
-		parsedPatch, err = template.EvaluateTemplate(cmPolicyObj.Spec.Patch.Engine, cmPolicyObj.Spec.Patch.Template, &specificTemplateInjectedObject)
-		if err != nil {
-			logger.Info(fmt.Sprintf("failed parsing patch template: %s", err.Error()))
-			kubeEventMessage = "Patch template failed. More info in controller logs."
-			goto createKubeEvent
-		}
-
-		tmpJsonPatchOperations, err = s.generateJsonPatchOperations(requestObj.Request.Object.Raw, cmPolicyObj.Spec.Patch.Type, []byte(parsedPatch))
-		if err != nil {
-			logger.Info(fmt.Sprintf("failed generating canonical jsonPatch operations for Kube API server: %s", err.Error()))
-			kubeEventMessage = "Generated patch is invalid. More info in controller logs."
-			goto createKubeEvent
-		}
-
-		jsonPatchOperations = append(jsonPatchOperations, tmpJsonPatchOperations...)
-		continue
-
-	createKubeEvent:
-		err = common.CreateKubeEvent(request.Context(), "default", "admission-server",
-			commonTemplateInjectedObject.Object, *cmPolicyObj, kubeEventAction, kubeEventMessage)
-		if err != nil {
-			logger.Info(fmt.Sprintf("failed creating Kubernetes event: %s", err.Error()))
-		}
+		patchedObjectBytes = result.Patched
+		jsonPatchOperations = append(jsonPatchOperations, result.Operations...)
 	}
 
 	// All working mutation patches are collected from policies, send them to Kubernetes
 	jsonPatchOperationBytes, err := json.Marshal(jsonPatchOperations)
+	if err != nil {
+		logger.Info(fmt.Sprintf("failed encoding the patch: %s", err.Error()))
+		return
+	}
 
 	reviewResponse.Response.Patch = jsonPatchOperationBytes
 	patchType := admissionv1.PatchTypeJSONPatch
 	reviewResponse.Response.PatchType = &patchType
 }
 
+// mutationResult is what one policy did with the object
+type mutationResult struct {
+	// Patched is the object after applying the patch of the policy
+	Patched []byte
+
+	// Operations are the operations to send to Kubernetes
+	Operations jsondiff.Patch
+
+	Outcome telemetry.Outcome
+	Reason  telemetry.Reason
+
+	// Err is what went wrong, for the logs
+	Err error
+
+	// Warning is a message for the user, empty when there is nothing to say
+	Warning string
+}
+
+// mutateWith applies the patch of one policy to the object, when its conditions were met
+func (s *HttpServer) mutateWith(
+	policy *v1alpha1.ClusterMutationPolicy,
+	data *template.InjectedData,
+	object []byte,
+	prepared evaluator.Result,
+) mutationResult {
+
+	if !prepared.Passed {
+		if prepared.Reason == telemetry.ReasonConditions {
+			return mutationResult{
+				Patched: object,
+				Outcome: telemetry.OutcomeFailed,
+				Reason:  telemetry.ReasonConditions,
+				Err:     prepared.Err,
+				Warning: fmt.Sprintf("admitik: policy '%s' could not evaluate its conditions, so it was skipped", policy.Name),
+			}
+		}
+
+		return mutationResult{Patched: object, Outcome: telemetry.OutcomeSkipped, Reason: prepared.Reason}
+	}
+
+	// A broken source does not stop the policy, but the user has to know
+	warning := ""
+	if prepared.Reason == telemetry.ReasonSources {
+		warning = fmt.Sprintf(
+			"admitik: policy '%s' could not read its sources, so it was applied with the objects available",
+			policy.Name)
+	}
+
+	parsedPatch, err := s.dependencies.Engines.Evaluate(policy.Spec.Patch.Engine, policy.Spec.Patch.Template, data)
+	if err != nil {
+		return mutationResult{
+			Patched: object,
+			Outcome: telemetry.OutcomeFailed,
+			Reason:  telemetry.ReasonTemplate,
+			Err:     err,
+			Warning: fmt.Sprintf("admitik: policy '%s' could not render its patch, so the object was not mutated by it", policy.Name),
+		}
+	}
+
+	operations, patched, err := s.generateJsonPatchOperations(object, policy.Spec.Patch.Type, []byte(parsedPatch))
+	if err != nil {
+		return mutationResult{
+			Patched: object,
+			Outcome: telemetry.OutcomeFailed,
+			Reason:  telemetry.ReasonPatch,
+			Err:     err,
+			Warning: fmt.Sprintf("admitik: policy '%s' generated an invalid patch, so the object was not mutated by it", policy.Name),
+		}
+	}
+
+	return mutationResult{
+		Patched:    patched,
+		Operations: operations,
+		Outcome:    telemetry.OutcomePatched,
+		Reason:     prepared.Reason,
+		Warning:    warning,
+	}
+}
+
 // generateJsonPatchOperations return a group of JsonPatch operations to mutate an object from its original
 // state to a final state. It's compatible with 'jsonpatch', 'jsonmerge' and 'strategicmerge' patch types.
-func (s *HttpServer) generateJsonPatchOperations(objectToPatch []byte, patchType string, patch []byte) (jsonPatchOperations jsondiff.Patch, err error) {
+func (s *HttpServer) generateJsonPatchOperations(objectToPatch []byte, patchType string, patch []byte) (jsonPatchOperations jsondiff.Patch, patchedObject []byte, err error) {
 	logger := log.FromContext(*s.dependencies.Context).
 		WithValues("controller", "admissionserver", "action", "mutation")
 
@@ -205,17 +272,17 @@ func (s *HttpServer) generateJsonPatchOperations(objectToPatch []byte, patchType
 	case v1alpha1.MutationPatchTypeMerge:
 		patchedObjectBytes, err = s.generateJsonMergePatch(objectToPatch, patch)
 		if err != nil {
-			return nil, fmt.Errorf("jsonmerge patch failed: %v", err)
+			return nil, nil, fmt.Errorf("jsonmerge patch failed: %v", err)
 		}
 	case v1alpha1.MutationPatchTypeStrategicMerge:
 		patchedObjectBytes, err = s.generateStrategicMergePatch(objectToPatch, patch)
 		if err != nil {
-			return nil, fmt.Errorf("strategicmerge patch failed: %v", err)
+			return nil, nil, fmt.Errorf("strategicmerge patch failed: %v", err)
 		}
 	default:
 		patchedObjectBytes, err = s.generateJsonPatchPatch(objectToPatch, patch)
 		if err != nil {
-			return nil, fmt.Errorf("jsonpatch patch failed: %v", err)
+			return nil, nil, fmt.Errorf("jsonpatch patch failed: %v", err)
 		}
 	}
 
@@ -225,7 +292,7 @@ func (s *HttpServer) generateJsonPatchOperations(objectToPatch []byte, patchType
 
 	tmpJsonPatchOperations, err = jsondiff.CompareJSON(objectToPatch, patchedObjectBytes)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// DEBUG: log candidate object, already patched candidate for it and operations that will be applied.
@@ -237,7 +304,7 @@ func (s *HttpServer) generateJsonPatchOperations(objectToPatch []byte, patchType
 		"jsonPatchOperations", tmpJsonPatchOperations.String(),
 	)
 
-	return tmpJsonPatchOperations, nil
+	return tmpJsonPatchOperations, patchedObjectBytes, nil
 }
 
 // generateJsonPatchPatch patches the object using JSONPath strategy and returns the resulting object
@@ -320,8 +387,7 @@ func (s *HttpServer) generateStrategicMergePatch(objectToPatch []byte, patch []b
 		Kind:    desiredGvk.Kind,
 	})
 
-	patchedObject := map[string]any{}
-	patchedObject, err = s.strategicMergePatcher.StrategicMerge(tmpOriginalObject, tmpPatchObject, initialSchema)
+	patchedObject, err := s.strategicMergePatcher.StrategicMerge(tmpOriginalObject, tmpPatchObject, initialSchema)
 	if err != nil {
 		return nil, err
 	}
@@ -332,53 +398,4 @@ func (s *HttpServer) generateStrategicMergePatch(objectToPatch []byte, patch []b
 	}
 
 	return patchedObjectBytes, nil
-}
-
-// dryRunPatchedObject use a dynamic client for validating the patched object through dry-run
-// TODO: Implement this DRY-RUN as a test before sending the patch to Kubernetes
-func dryRunPatchedObject(req *admissionv1.AdmissionRequest, patched []byte) error {
-	var err error
-
-	// Ignore operations different from CREATE or UPDATE
-	if req.Operation != admissionv1.Create && req.Operation != admissionv1.Update {
-		return nil
-	}
-
-	// Transform patched object
-	var obj unstructured.Unstructured
-	if err := json.Unmarshal(patched, &obj.Object); err != nil {
-		return fmt.Errorf("failed to unmarshal patched object: %w", err)
-	}
-
-	// Rebuild GVR for the resource
-	gvr := schema.GroupVersionResource{
-		Group:    req.Resource.Group,
-		Version:  req.Resource.Version,
-		Resource: req.Resource.Resource,
-	}
-	namespace := req.Namespace
-
-	//
-	resourceClient := globals.Application.KubeRawClient.Resource(gvr)
-	var resource dynamic.ResourceInterface = resourceClient
-	if namespace != "" {
-		resource = resourceClient.Namespace(namespace)
-	}
-
-	switch req.Operation {
-	case admissionv1.Create:
-		_, err = resource.Create(globals.Application.Context, &obj, metav1.CreateOptions{
-			DryRun: []string{metav1.DryRunAll},
-		})
-	case admissionv1.Update:
-		_, err = resource.Update(globals.Application.Context, &obj, metav1.UpdateOptions{
-			DryRun: []string{metav1.DryRunAll},
-		})
-	}
-
-	if err != nil {
-		return fmt.Errorf("dry-run failed: %w", err)
-	}
-
-	return nil
 }

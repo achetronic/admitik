@@ -20,8 +20,8 @@ import (
 	"net/http"
 
 	//
-	"github.com/freepik-company/admitik/internal/globals"
-	"github.com/freepik-company/admitik/internal/strategicmerge"
+	"github.com/admitikcore/admitik/internal/globals"
+	"github.com/admitikcore/admitik/internal/strategicmerge"
 )
 
 // HttpServer represents a simple HTTP server

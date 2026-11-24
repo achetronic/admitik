@@ -17,6 +17,7 @@ limitations under the License.
 package clustermutationpolicy
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -24,15 +25,13 @@ import (
 
 	//
 	admissionregv1 "k8s.io/api/admissionregistration/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	//
-	"github.com/freepik-company/admitik/api/v1alpha1"
-	"github.com/freepik-company/admitik/internal/controller"
+	"github.com/admitikcore/admitik/api/v1alpha1"
+	"github.com/admitikcore/admitik/internal/controller"
 )
 
 const (
@@ -56,31 +55,73 @@ var (
 		admissionregv1.Connect}
 
 	//
-	MutatingWebhookConfigurationRuleScopeAll = admissionregv1.ScopeType("*")
 )
 
 // ReconcileClusterMutationPolicy keeps internal ClusterMutationPolicy resources' registry up-to-date
-func (r *ClusterMutationPolicyReconciler) ReconcileClusterMutationPolicy(ctx context.Context, eventType watch.EventType, resourceManifest *v1alpha1.ClusterMutationPolicy) (err error) {
+func (r *ClusterMutationPolicyReconciler) ReconcileClusterMutationPolicy(
+	ctx context.Context, eventType watch.EventType, resourceManifest *v1alpha1.ClusterMutationPolicy) (err error) {
+
 	logger := log.FromContext(ctx)
 
-	// Update the registry
-	var desiredWatchedTypes []string
-	for _, intercResourceGroup := range resourceManifest.Spec.InterceptedResources {
+	watched := WatchedTypes(resourceManifest)
 
-		// Replace wildcards in operations
-		if slices.Contains(intercResourceGroup.Operations, admissionregv1.OperationAll) {
-			intercResourceGroup.Operations = MutationOperations
+	// Update the registry store
+	if eventType == watch.Deleted {
+		for _, watchedType := range watched {
+			logger.Info(resourceDeletionMessage, "watcher", watchedType)
+			r.Dependencies.ClusterMutationPolicyRegistry.Store.RemoveResource(watchedType, resourceManifest)
+		}
+	} else {
+		for _, watchedType := range watched {
+			logger.Info(resourceUpdatedMessage, "watcher", watchedType)
+			r.Dependencies.ClusterMutationPolicyRegistry.Store.AddOrUpdateResource(watchedType, resourceManifest)
+		}
+	}
+
+	// Clean non-desired watched types. This is needed for updates where the user
+	// reduces the amount of watched operations on watched resources
+	for _, registeredResourceType := range r.Dependencies.ClusterMutationPolicyRegistry.Store.GetCollectionNames() {
+		if !slices.Contains(watched, registeredResourceType) {
+			r.Dependencies.ClusterMutationPolicyRegistry.Store.RemoveResource(registeredResourceType, resourceManifest)
+		}
+	}
+
+	// Order each collection by priority, so the patches are always applied in the same order.
+	// This is what makes the mutation deterministic between replicas
+	for _, watchedType := range watched {
+		r.Dependencies.ClusterMutationPolicyRegistry.Store.SortCollection(watchedType, func(a, b *v1alpha1.ClusterMutationPolicy) bool {
+			return ComparePolicies(a, b) < 0
+		})
+	}
+
+	// Only the leader writes the webhook configuration. The rest of the replicas keep the store
+	// updated, which is what the admission server of each replica needs
+	if !r.IsLeader() {
+		return nil
+	}
+
+	return r.SyncWebhookConfiguration(ctx)
+}
+
+// WatchedTypes returns the collection keys the policy applies to, expressed as
+// {group}/{version}/{resource}/{operation}
+func WatchedTypes(policy *v1alpha1.ClusterMutationPolicy) []string {
+
+	watched := []string{}
+
+	for _, intercResourceGroup := range policy.Spec.InterceptedResources {
+
+		operations := intercResourceGroup.Operations
+		if slices.Contains(operations, admissionregv1.OperationAll) {
+			operations = MutationOperations
 		}
 
-		//
-		for _, operation := range intercResourceGroup.Operations {
+		for _, operation := range operations {
 
-			// Skip unsupported operations
 			if !slices.Contains(MutationOperations, operation) {
 				continue
 			}
 
-			//
 			watchedType := strings.Join([]string{
 				intercResourceGroup.Group,
 				intercResourceGroup.Version,
@@ -88,154 +129,78 @@ func (r *ClusterMutationPolicyReconciler) ReconcileClusterMutationPolicy(ctx con
 				string(operation),
 			}, "/")
 
-			// Handle deletion requests
-			if eventType == watch.Deleted {
-				logger.Info(resourceDeletionMessage, "watcher", watchedType)
-				r.Dependencies.ClusterMutationPolicyRegistry.RemoveResource(watchedType, resourceManifest)
+			if slices.Contains(watched, watchedType) {
 				continue
 			}
 
-			// Handle creation/update requests
-			if eventType == watch.Modified {
-				logger.Info(resourceUpdatedMessage, "watcher", watchedType)
-
-				// Avoid adding those already added.
-				// This prevents user from defining the group more than once per manifest
-				if slices.Contains(desiredWatchedTypes, watchedType) {
-					continue
-				}
-				desiredWatchedTypes = append(desiredWatchedTypes, watchedType)
-				r.Dependencies.ClusterMutationPolicyRegistry.AddOrUpdateResource(watchedType, resourceManifest)
-			}
+			watched = append(watched, watchedType)
 		}
 	}
 
-	// Clean non-desired watched types. This is needed for updates where the user
-	// reduces the amount of watched operations on watched resources
-	for _, registeredResourceType := range r.Dependencies.ClusterMutationPolicyRegistry.GetCollectionNames() {
-		if !slices.Contains(desiredWatchedTypes, registeredResourceType) {
-			r.Dependencies.ClusterMutationPolicyRegistry.RemoveResource(registeredResourceType, resourceManifest)
-		}
-	}
+	return watched
+}
 
-	// Craft MutatingWebhookConfiguration rules based on the previous existing one and current pool keys
-	metaWebhookObj, alreadyCreated, err := r.getMergedMutatingWebhookConfiguration(ctx)
+// ComparePolicies orders the policies by priority and, for the same priority, by name.
+// The name is the tie breaker that makes the order total, so every replica gets the same one
+func ComparePolicies(a, b *v1alpha1.ClusterMutationPolicy) int {
+	return cmp.Or(
+		cmp.Compare(a.Spec.Priority, b.Spec.Priority),
+		strings.Compare(a.Name, b.Name),
+	)
+}
+
+// SyncWebhookConfiguration writes the webhook configuration the cluster should have, built from
+// the policies that exist right now. It must only be called by the leader
+func (r *ClusterMutationPolicyReconciler) SyncWebhookConfiguration(ctx context.Context) error {
+
+	configuration := &admissionregv1.MutatingWebhookConfiguration{}
+	configuration.Name = MutatingWebhookConfigurationName
+
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, configuration, func() error {
+		patterns, err := r.watchedTypes(ctx)
+		if err != nil {
+			return err
+		}
+
+		rules, err := controller.WebhookRules(patterns)
+		if err != nil {
+			return err
+		}
+
+		configuration.Webhooks = []admissionregv1.MutatingWebhook{
+			controller.NewMutatingWebhook(controller.WebhookOptions{
+				Name:                 "mutate.admitik.svc",
+				Rules:                rules,
+				ClientConfig:         r.Options.WebhookClientConfig,
+				TimeoutSeconds:       int32(r.Options.WebhookTimeout),
+				CurrentNamespace:     r.Options.CurrentNamespace,
+				ExcludeSelfNamespace: r.Options.ExcludeAdmissionSelfNamespace,
+				ExcludedNamespaces:   r.Options.ExcludedAdmissionNamespaces,
+				IgnoreLabeledObjects: r.Options.EnableSpecialLabels,
+			}),
+		}
+
+		return nil
+	})
 	if err != nil {
-		err = fmt.Errorf("error building MutatingWebhookConfiguration '%s': %s",
-			MutatingWebhookConfigurationName, err.Error())
-		return
-	}
-
-	// Sync changes to Kubernetes
-	if !alreadyCreated {
-		err = r.Create(ctx, &metaWebhookObj)
-		if err != nil {
-			err = fmt.Errorf("error creating MutatingWebhookConfiguration in Kubernetes'%s': %s",
-				MutatingWebhookConfigurationName, err.Error())
-			return
-		}
-	} else {
-		err = r.Update(ctx, &metaWebhookObj)
-		if err != nil {
-			err = fmt.Errorf("error updating MutatingWebhookConfiguration in Kubernetes '%s': %s",
-				MutatingWebhookConfigurationName, err.Error())
-			return
-		}
+		return fmt.Errorf("error syncing the MutatingWebhookConfiguration '%s': %w", MutatingWebhookConfigurationName, err)
 	}
 
 	return nil
 }
 
-// getValidatingWebhookConfiguration return a ValidatingWebhookConfiguration object that is built based on
-// previous existing one in Kubernetes and the current pool keys extracted from ClusterMutationPolicy.spec.InterceptedResources
-func (r *ClusterMutationPolicyReconciler) getMergedMutatingWebhookConfiguration(ctx context.Context) (
-	mwConfig admissionregv1.MutatingWebhookConfiguration, alreadyCreated bool, err error) {
+// watchedTypes returns the collection keys of every policy in the cluster
+func (r *ClusterMutationPolicyReconciler) watchedTypes(ctx context.Context) ([]string, error) {
 
-	// Craft ValidatingWebhookConfiguration rules based on the pool keys
-	currentVwcRules := []admissionregv1.RuleWithOperations{}
-	InterceptedResourcesPatterns := r.Dependencies.ClusterMutationPolicyRegistry.GetCollectionNames()
-
-	for _, resourcePattern := range InterceptedResourcesPatterns {
-
-		resourcePatternParts := strings.Split(resourcePattern, "/")
-		if len(resourcePatternParts) != 4 {
-			err = fmt.Errorf("some key-pattern is invalid on ClusterMutationPolicyPool. Open an issue to fix it")
-			return
-		}
-
-		tmpRule := admissionregv1.RuleWithOperations{
-			Rule: admissionregv1.Rule{
-				APIGroups:   []string{resourcePatternParts[0]},
-				APIVersions: []string{resourcePatternParts[1]},
-				Resources:   []string{resourcePatternParts[2]},
-				Scope:       &MutatingWebhookConfigurationRuleScopeAll,
-			},
-			Operations: []admissionregv1.OperationType{admissionregv1.OperationType(resourcePatternParts[3])},
-		}
-		currentVwcRules = append(currentVwcRules, tmpRule)
+	policies := &v1alpha1.ClusterMutationPolicyList{}
+	if err := r.List(ctx, policies); err != nil {
+		return nil, fmt.Errorf("error listing the ClusterMutationPolicy resources: %w", err)
 	}
 
-	// Obtain potential existing ValidatingWebhookConfiguration
-	metaWebhookObj := admissionregv1.MutatingWebhookConfiguration{}
-	metaWebhookObj.Name = MutatingWebhookConfigurationName
-
-	err = r.Get(ctx, types.NamespacedName{
-		Name: MutatingWebhookConfigurationName,
-	}, &metaWebhookObj)
-	if err != nil {
-		if !errors.IsNotFound(err) {
-			err = fmt.Errorf("error getting the MutatingWebhookConfiguration '%s' : %s",
-				MutatingWebhookConfigurationName, err.Error())
-			return
-		}
+	patterns := []string{}
+	for index := range policies.Items {
+		patterns = append(patterns, WatchedTypes(&policies.Items[index])...)
 	}
 
-	if !strings.EqualFold(string(metaWebhookObj.UID), "") {
-		alreadyCreated = true
-	}
-
-	// Create a bare new 'webhooks' section for the ValidatingWebhookConfiguration and fill it
-	tmpWebhookObj := admissionregv1.MutatingWebhook{}
-	timeoutSecondsConverted := int32(r.Options.WebhookTimeout)
-
-	tmpWebhookObj.Name = "mutate.admitik.svc"
-	tmpWebhookObj.AdmissionReviewVersions = []string{"v1"}
-	tmpWebhookObj.ClientConfig = r.Options.WebhookClientConfig
-	tmpWebhookObj.Rules = currentVwcRules
-	tmpWebhookObj.TimeoutSeconds = &timeoutSecondsConverted
-
-	// Ignore sensitive namespaces to avoid breaking Kubernetes essential services or chicken-egg scenarios
-	selectedNamespaces := []string{}
-	if !strings.EqualFold(r.Options.ExcludedAdmissionNamespaces, "") {
-		selectedNamespaces = strings.Split(r.Options.ExcludedAdmissionNamespaces, ",")
-	}
-	if r.Options.ExcludeAdmissionSelfNamespace {
-		selectedNamespaces = append(selectedNamespaces, r.Options.CurrentNamespace)
-	}
-
-	if len(selectedNamespaces) > 0 {
-		tmpWebhookObj.NamespaceSelector = &v1.LabelSelector{}
-		tmpWebhookObj.NamespaceSelector.MatchExpressions = []v1.LabelSelectorRequirement{{
-			Key:      "kubernetes.io/metadata.name",
-			Operator: v1.LabelSelectorOpNotIn,
-			Values:   selectedNamespaces,
-		}}
-	}
-
-	// Ignore admission for resources meeting a special label
-	if r.Options.EnableSpecialLabels {
-		tmpWebhookObj.ObjectSelector = &v1.LabelSelector{}
-		tmpWebhookObj.ObjectSelector.MatchExpressions = []v1.LabelSelectorRequirement{{
-			Key:      controller.IgnoreAdmissionLabel,
-			Operator: v1.LabelSelectorOpDoesNotExist,
-		}}
-	}
-
-	sideEffectsClass := admissionregv1.SideEffectClass(admissionregv1.SideEffectClassNone)
-	tmpWebhookObj.SideEffects = &sideEffectsClass
-
-	// Replace the webhooks section in the ValidatingWebhookConfiguration
-	metaWebhookObj.Webhooks = []admissionregv1.MutatingWebhook{tmpWebhookObj}
-
-	return metaWebhookObj, alreadyCreated, nil
+	return patterns, nil
 }

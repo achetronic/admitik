@@ -28,8 +28,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	//
-	"github.com/freepik-company/admitik/api/v1alpha1"
-	"github.com/freepik-company/admitik/internal/globals"
+	"github.com/admitikcore/admitik/api/v1alpha1"
+	"github.com/admitikcore/admitik/internal/globals"
 )
 
 // CreateKubeEvent creates a modern event in Kubernetes with data given by params
@@ -99,4 +99,21 @@ func CreateKubeEvent(ctx context.Context, namespace string, reporter string, obj
 		Create(ctx, &eventObj, metav1.CreateOptions{})
 
 	return err
+}
+
+// EventNamespace returns the namespace where an event about the object has to be created.
+// Cluster scoped objects have no namespace, and their events go to the default one
+func EventNamespace(object map[string]any) string {
+
+	metadata, isMap := object["metadata"].(map[string]any)
+	if !isMap {
+		return "default"
+	}
+
+	namespace, _ := metadata["namespace"].(string)
+	if namespace == "" {
+		return "default"
+	}
+
+	return namespace
 }

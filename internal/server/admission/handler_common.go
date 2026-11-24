@@ -22,16 +22,17 @@ import (
 
 	//
 	admissionv1 "k8s.io/api/admission/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	//
-	"github.com/freepik-company/admitik/internal/common"
-	"github.com/freepik-company/admitik/internal/template"
+	"github.com/admitikcore/admitik/internal/common"
+	"github.com/admitikcore/admitik/internal/template"
 )
 
 // populatePolicyDataFromAdmission enriches the policy evaluation context with data from the admission request.
 // Extracts data such as the operation type, target object or previous object state (for updates) from the AdmissionReview
 // and populates the corresponding fields in the policy evaluation data structure.
-func (s *HttpServer) populatePolicyDataFromAdmission(adReview *admissionv1.AdmissionReview, injectedData *template.PolicyEvaluationDataT) (err error) {
+func (s *HttpServer) populatePolicyDataFromAdmission(adReview *admissionv1.AdmissionReview, injectedData *template.InjectedData) (err error) {
 
 	// Store desired operation
 	injectedData.Operation = common.GetNormalizedOperation(adReview.Request.Operation)
@@ -51,4 +52,34 @@ func (s *HttpServer) populatePolicyDataFromAdmission(adReview *admissionv1.Admis
 	}
 
 	return nil
+}
+
+// maxWarningLength is the size a warning can have before Kubernetes truncates it
+const maxWarningLength = 200
+
+// addWarning adds a message the user will see in the output of kubectl. It is the channel used to
+// tell why a policy did not do what the user expected, without writing anything to the cluster
+func addWarning(response *admissionv1.AdmissionResponse, message string) {
+
+	if len(message) > maxWarningLength {
+		message = message[:maxWarningLength] + "..."
+	}
+
+	response.Warnings = append(response.Warnings, message)
+}
+
+// countSourceObjects returns how many source objects are injected in one evaluation
+func countSourceObjects(sources map[int][]map[string]any) int {
+
+	total := 0
+	for _, objects := range sources {
+		total += len(objects)
+	}
+
+	return total
+}
+
+// resourceID returns the resource as {group}/{version}/{resource}
+func resourceID(resource metav1.GroupVersionResource) string {
+	return fmt.Sprintf("%s/%s/%s", resource.Group, resource.Version, resource.Resource)
 }

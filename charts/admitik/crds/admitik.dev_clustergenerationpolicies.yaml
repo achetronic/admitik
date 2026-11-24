@@ -65,6 +65,16 @@ spec:
                 x-kubernetes-list-map-keys:
                 - name
                 x-kubernetes-list-type: map
+              deletionPolicy:
+                default: Keep
+                description: |-
+                  DeletionPolicy decides what happens to the generated objects when this policy is deleted.
+                  Delete removes everything the policy has written, which includes the objects it adopted
+                  when 'overwriteExisting' is enabled
+                enum:
+                - Keep
+                - Delete
+                type: string
               object:
                 description: ObjectT TODO
                 properties:
@@ -91,16 +101,57 @@ spec:
                 description: Sources represents a list of extra resource-groups to
                   watch and inject in templates
                 items:
-                  description: ResourceGroupT represents a resource-group that will
-                    be watched to be evaluated
+                  description: SourceGroupT represents a TODO
                   properties:
+                    filters:
+                      properties:
+                        metadata:
+                          properties:
+                            matchAnnotations:
+                              additionalProperties:
+                                type: string
+                              type: object
+                            matchLabels:
+                              additionalProperties:
+                                type: string
+                              type: object
+                          type: object
+                        name:
+                          properties:
+                            matchList:
+                              items:
+                                type: string
+                              type: array
+                            matchRegex:
+                              properties:
+                                expression:
+                                  type: string
+                                negative:
+                                  type: boolean
+                              required:
+                              - expression
+                              - negative
+                              type: object
+                          type: object
+                        namespace:
+                          properties:
+                            matchList:
+                              items:
+                                type: string
+                              type: array
+                            matchRegex:
+                              properties:
+                                expression:
+                                  type: string
+                                negative:
+                                  type: boolean
+                              required:
+                              - expression
+                              - negative
+                              type: object
+                          type: object
+                      type: object
                     group:
-                      type: string
-                    name:
-                      default: ""
-                      type: string
-                    namespace:
-                      default: ""
                       type: string
                     resource:
                       type: string
@@ -116,8 +167,6 @@ spec:
                 - group
                 - version
                 - resource
-                - name
-                - namespace
                 x-kubernetes-list-type: map
               watchedResources:
                 description: WatchedResources represents a list of resource-groups

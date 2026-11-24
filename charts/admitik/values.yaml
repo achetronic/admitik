@@ -16,7 +16,7 @@ controller:
   replicaCount: 2
 
   image:
-    repository: ghcr.io/freepik-company/admitik
+    repository: ghcr.io/admitikcore/admitik
     pullPolicy: IfNotPresent
     # Overrides the image tag whose default is the chart appVersion.
     tag: ""
@@ -24,7 +24,7 @@ controller:
   imagePullSecrets: []
 
   # Extra args to pass to the controller.
-  # Ref: https://github.com/freepik-company/admitik/blob/master/docs/configuration.md
+  # Ref: https://github.com/admitikcore/admitik/blob/master/docs/configuration.md
   # Example:
   # - --webhook-server-ca=/etc/webhook-server/certs/ca.crt
   # - --webhook-server-certificate=/etc/webhook-server/certs/tls.crt
@@ -39,6 +39,7 @@ controller:
   - --enable-special-labels
   - --exclude-admission-self-namespace
   - --excluded-admission-namespaces=kube-system
+  - --audit-interval=10m
 
   # Define a list of environment variables used inside the controller
   # Ref: https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/#use-configmap-defined-environment-variables-in-pod-commands

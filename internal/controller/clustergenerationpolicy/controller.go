@@ -23,7 +23,7 @@ import (
 	//
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	controllerRuntimeController "sigs.k8s.io/controller-runtime/pkg/controller"
@@ -32,16 +32,24 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	//
-	"github.com/freepik-company/admitik/api/v1alpha1"
-	"github.com/freepik-company/admitik/internal/controller"
-	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
+	"github.com/admitikcore/admitik/api/v1alpha1"
+	"github.com/admitikcore/admitik/internal/controller"
+	policyStore "github.com/admitikcore/admitik/internal/policystore"
 )
 
 type ClusterGenerationPolicyControllerOptions struct {
 }
 
+// Deleter removes the objects a policy generated
+type Deleter interface {
+	Delete(ctx context.Context, policyKind, policyName string) (int, error)
+}
+
 type ClusterGenerationPolicyControllerDependencies struct {
 	ClusterGenerationPolicyRegistry *policyStore.PolicyStore[*v1alpha1.ClusterGenerationPolicy]
+
+	// Cascade removes the generated objects when the policy asks for it. It can be nil
+	Cascade Deleter
 }
 
 // ClusterGenerationPolicyReconciler reconciles a ClusterGenerationPolicy object
@@ -150,7 +158,7 @@ func (r *ClusterGenerationPolicyReconciler) SetupWithManager(mgr ctrl.Manager) e
 		For(&v1alpha1.ClusterGenerationPolicy{}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		WithOptions(controllerRuntimeController.Options{
-			NeedLeaderElection: pointer.Bool(false),
+			NeedLeaderElection: ptr.To(false),
 		}).
 		Complete(r)
 }

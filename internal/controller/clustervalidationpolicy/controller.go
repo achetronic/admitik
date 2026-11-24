@@ -24,7 +24,7 @@ import (
 	admissionregv1 "k8s.io/api/admissionregistration/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	controllerRuntimeController "sigs.k8s.io/controller-runtime/pkg/controller"
@@ -33,9 +33,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	//
-	"github.com/freepik-company/admitik/api/v1alpha1"
-	"github.com/freepik-company/admitik/internal/controller"
-	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
+	"github.com/admitikcore/admitik/api/v1alpha1"
+	"github.com/admitikcore/admitik/internal/controller"
+	policyStore "github.com/admitikcore/admitik/internal/policystore"
 )
 
 type ClusterValidationPolicyControllerOptions struct {
@@ -46,6 +46,25 @@ type ClusterValidationPolicyControllerOptions struct {
 
 	WebhookClientConfig admissionregv1.WebhookClientConfig
 	WebhookTimeout      int
+
+	// Elected is closed when this replica becomes the leader. Only the leader writes the
+	// webhook configuration, so several replicas do not fight over the same object
+	Elected <-chan struct{}
+}
+
+// IsLeader reports whether this replica is allowed to write the webhook configuration
+func (r *ClusterValidationPolicyReconciler) IsLeader() bool {
+
+	if r.Options.Elected == nil {
+		return true
+	}
+
+	select {
+	case <-r.Options.Elected:
+		return true
+	default:
+		return false
+	}
 }
 
 type ClusterValidationPolicyControllerDependencies struct {
@@ -158,7 +177,7 @@ func (r *ClusterValidationPolicyReconciler) SetupWithManager(mgr ctrl.Manager) e
 		For(&v1alpha1.ClusterValidationPolicy{}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		WithOptions(controllerRuntimeController.Options{
-			NeedLeaderElection: pointer.Bool(false),
+			NeedLeaderElection: ptr.To(false),
 		}).
 		Complete(r)
 }

@@ -31,7 +31,7 @@ type applicationT struct {
 	Context context.Context
 
 	// Kubernetes clients
-	KubeDiscoveryClient *discovery.DiscoveryClient
-	KubeRawClient       *dynamic.DynamicClient
-	KubeRawCoreClient   *kubernetes.Clientset
+	KubeDiscoveryClient discovery.DiscoveryInterface
+	KubeRawClient       dynamic.Interface
+	KubeRawCoreClient   kubernetes.Interface
 }

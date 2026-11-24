@@ -28,9 +28,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	//
-	"github.com/freepik-company/admitik/api/v1alpha1"
-	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
-	sourcesRegistry "github.com/freepik-company/admitik/internal/registry/sources"
+	"github.com/admitikcore/admitik/api/v1alpha1"
+	"github.com/admitikcore/admitik/internal/evaluator"
+	policyStore "github.com/admitikcore/admitik/internal/policystore"
+	"github.com/admitikcore/admitik/internal/telemetry"
+	"github.com/admitikcore/admitik/internal/template"
 )
 
 const (
@@ -48,7 +50,15 @@ type AdmissionServerDependencies struct {
 	//
 	ClusterValidationPolicyRegistry *policyStore.PolicyStore[*v1alpha1.ClusterValidationPolicy]
 	ClusterMutationPolicyRegistry   *policyStore.PolicyStore[*v1alpha1.ClusterMutationPolicy]
-	SourcesRegistry                 *sourcesRegistry.SourcesRegistry
+
+	// Evaluator prepares the context of the policies and checks their conditions
+	Evaluator *evaluator.Evaluator
+
+	// Engines renders the conditions, patches and messages of the policies
+	Engines *template.Registry
+
+	// Metrics records what the policies decide. It can be nil
+	Metrics *telemetry.Recorder
 }
 
 // AdmissionServerOptions represents available options that can be passed
