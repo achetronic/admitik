@@ -169,6 +169,9 @@ All contributions are welcome! Whether you're reporting bugs, suggesting feature
 ▸ [Check open milestones](https://github.com/admitikcore/admitik/milestones) to see what’s coming
 
 ▸ [Read the architecture overview](./docs/architecture.md) to know what lives where
+
+▸ [Read the log contract](./docs/logs.md) before building alerts or dashboards on the logs
+
 ▸ [Read the contributing guide](./docs/CONTRIBUTING.md) to get started smoothly
 
 

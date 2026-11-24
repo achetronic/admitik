@@ -24,6 +24,21 @@ import (
 	"github.com/admitikcore/admitik/internal/common"
 )
 
+// The keys of a decision line. They are a contract with whoever reads the logs, so they are
+// declared once and never written as a literal anywhere else
+const (
+	FieldPolicy     = "policy"
+	FieldPolicyKind = "policyKind"
+	FieldOperation  = "operation"
+	FieldObject     = "object"
+	FieldResult     = "result"
+	FieldReason     = "reason"
+	FieldMessage    = "message"
+
+	// MessagePolicyDecision is the message of every line that describes a decision
+	MessagePolicyDecision = "policy decision"
+)
+
 // DecisionLine is one policy over one object: which policy, what kind, over which object, in
 // which operation, and what came out of it
 type DecisionLine struct {
@@ -47,30 +62,38 @@ type DecisionLine struct {
 // same fields, so a query over the logs works across all of them
 func LogDecision(logger logr.Logger, line DecisionLine, extra ...any) {
 
-	fields := []any{
-		"policy", line.Policy,
-		"policyKind", line.Kind,
-		"operation", line.Operation,
-		"object", line.Object,
-		"result", line.Result,
-		"reason", line.Reason,
-	}
-
-	if line.Message != "" {
-		fields = append(fields, "message", line.Message)
-	}
-
+	fields := DecisionFields(line)
 	fields = append(fields, extra...)
 
 	switch {
 	case line.Err != nil:
-		logger.Error(line.Err, "policy decision", fields...)
+		logger.Error(line.Err, MessagePolicyDecision, fields...)
 	case changedSomething(line.Result):
-		logger.Info("policy decision", fields...)
+		logger.Info(MessagePolicyDecision, fields...)
 	default:
 		// A policy that did nothing only matters when somebody is debugging
-		logger.V(1).Info("policy decision", fields...)
+		logger.V(1).Info(MessagePolicyDecision, fields...)
 	}
+}
+
+// DecisionFields returns what a decision line carries, in order. It is the contract of the line:
+// a test checks it, so a field cannot be renamed or dropped by accident
+func DecisionFields(line DecisionLine) []any {
+
+	fields := []any{
+		FieldPolicy, line.Policy,
+		FieldPolicyKind, line.Kind,
+		FieldOperation, line.Operation,
+		FieldObject, line.Object,
+		FieldResult, line.Result,
+		FieldReason, line.Reason,
+	}
+
+	if line.Message != "" {
+		fields = append(fields, FieldMessage, line.Message)
+	}
+
+	return fields
 }
 
 // changedSomething tells whether a result is worth a line at info

@@ -32,27 +32,8 @@ They are described in the following table:
 
 ## Logs
 
-Every decision writes one line, with the same fields for every kind of policy:
-
-```json
-{"level":"info","msg":"policy decision","policy":"require-limits","policyKind":"validate","operation":"CREATE","object":{"apiVersion":"apps/v1","kind":"Deployment","namespace":"team-a","name":"checkout"},"result":"denied","reason":"conditions","message":"the container 'api' must declare a cpu limit"}
-```
-
-| Field | Meaning |
-|:--|:--|
-| `policy` | the policy that was involved |
-| `policyKind` | `validate`, `mutate` or `generate` |
-| `operation` | `CREATE`, `UPDATE` or `DELETE` |
-| `object` | the object, as `apiVersion`, `kind`, `namespace` and `name` |
-| `result` | `allowed`, `denied`, `permissive`, `patched`, `skipped`, `generated` or `failed` |
-| `reason` | `none`, `sources`, `conditions`, `template`, `patch` or `apply` |
-| `message` | why, when there is something to say |
-
-A policy that changed something leaves its line at `info`: a rejection, a patch, a generated object
-or a failure. The ones that did nothing only appear with `--zap-log-level=debug`.
-
-Generation lines carry `trigger`, the object that woke the policy up, next to `object`, the one it
-wrote.
+Every decision writes one line, with the same fields for every kind of policy. The fields, the
+levels and what may change are written down in [logs.md](./logs.md).
 
 > The flags of the logger are bound by controller-runtime, so `--zap-log-level` and the rest are
 > also available.

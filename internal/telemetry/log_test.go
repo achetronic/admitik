@@ -17,6 +17,7 @@ limitations under the License.
 package telemetry
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -159,5 +160,94 @@ func TestLogDecisionAppendsTheExtraFields(t *testing.T) {
 
 	if !strings.Contains((*lines)[0], `"duration"="312µs"`) {
 		t.Errorf("got %q, expected the extra field", (*lines)[0])
+	}
+}
+
+// TestTheContractOfADecisionLine pins the fields every decision line carries. Changing them breaks
+// the queries of whoever reads the logs, so the test must be updated on purpose, together with
+// docs/logs.md
+func TestTheContractOfADecisionLine(t *testing.T) {
+	line := mutationLine()
+
+	fields := DecisionFields(line)
+
+	expected := []string{
+		FieldPolicy, "inject-team-labels",
+		FieldPolicyKind, "mutate",
+		FieldOperation, "CREATE",
+		FieldObject, "",
+		FieldResult, "patched",
+		FieldReason, "none",
+	}
+
+	if len(fields) != len(expected) {
+		t.Fatalf("got %d fields, expected %d: %v", len(fields), len(expected), fields)
+	}
+
+	for index, value := range expected {
+		if value == "" {
+			continue
+		}
+		if fmt.Sprintf("%v", fields[index]) != value {
+			t.Errorf("field %d is %v, expected %q", index, fields[index], value)
+		}
+	}
+}
+
+func TestTheMessageIsTheOnlyOptionalField(t *testing.T) {
+	line := mutationLine()
+
+	if got := len(DecisionFields(line)); got != 12 {
+		t.Errorf("got %d fields without a message, expected 12", got)
+	}
+
+	line.Message = "why"
+	if got := len(DecisionFields(line)); got != 14 {
+		t.Errorf("got %d fields with a message, expected 14", got)
+	}
+}
+
+// TestTheContractOfTheObjectRef pins how an object is written in a line
+func TestTheContractOfTheObjectRef(t *testing.T) {
+	encoded, err := json.Marshal(common.ObjectRef{
+		APIVersion: "apps/v1", Kind: "Deployment", Namespace: "team-a", Name: "checkout",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := `{"apiVersion":"apps/v1","kind":"Deployment","namespace":"team-a","name":"checkout"}`
+	if string(encoded) != expected {
+		t.Errorf("got %s, expected %s", encoded, expected)
+	}
+
+	// A cluster scoped object has no namespace
+	encoded, err = json.Marshal(common.ObjectRef{APIVersion: "v1", Kind: "Namespace", Name: "team-a"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected = `{"apiVersion":"v1","kind":"Namespace","name":"team-a"}`
+	if string(encoded) != expected {
+		t.Errorf("got %s, expected %s", encoded, expected)
+	}
+}
+
+// TestTheResultsThatReachInfo pins which results are worth a line at info
+func TestTheResultsThatReachInfo(t *testing.T) {
+	cases := map[Outcome]bool{
+		OutcomeDenied:     true,
+		OutcomePermissive: true,
+		OutcomePatched:    true,
+		OutcomeGenerated:  true,
+		OutcomeFailed:     true,
+		OutcomeAllowed:    false,
+		OutcomeSkipped:    false,
+	}
+
+	for result, expected := range cases {
+		if got := changedSomething(result); got != expected {
+			t.Errorf("got %v for %q, expected %v", got, result, expected)
+		}
 	}
 }

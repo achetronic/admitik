@@ -55,15 +55,15 @@ If you touch anything under `api/`, regenerate the CRDs and the deepcopy code, a
 into the chart:
 
 ```console
-make manifests generate
-cp config/crd/bases/*.yaml charts/admitik/crds/
+make manifests generate chart-crds
 ```
 
 `make manifests` writes the CRDs, the RBAC and the webhook manifests. `make generate` writes
-`zz_generated.deepcopy.go`. Running them twice must produce no changes.
+`zz_generated.deepcopy.go`. `make chart-crds` copies the CRDs into the chart. Running them twice
+must produce no changes: `make verify-chart` fails when they do, and the checks of the pull
+request run it.
 
-> `controller-gen` v0.15 does not build with new versions of Go. Set `GOTOOLCHAIN=go1.23.x` if the
-> download fails.
+If you touch a log line, the fields are a contract: see [logs.md](./logs.md).
 
 ## How releases are created
 
