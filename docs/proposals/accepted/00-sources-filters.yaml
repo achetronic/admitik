@@ -28,7 +28,7 @@ spec:
         namespace:
           matchList:
             - kube-system
-            - {{cel: object.metadata.namespace }}
+            - "{{cel: object.metadata.namespace }}"
 
           # matchRegex:
           #   negative: true
@@ -36,11 +36,11 @@ spec:
 
         name:
           matchList:
-            - {{cel: object.metadata.name }}
+            - "{{cel: object.metadata.name }}"
               
           # matchRegex:
           #   negative: false
-          #   expression: "^( {{cel: object.metadata.name }} )-.*$"
+          #   expression: "^( "{{cel: object.metadata.name }}" )-.*$"
 
         metadata:
           matchLabels:

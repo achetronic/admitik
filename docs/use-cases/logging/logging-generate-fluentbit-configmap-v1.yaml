@@ -5,7 +5,7 @@
 # This configmap is used to configure the fluentbit sidecar in the pods and send the logs to a fluentd instance.
 
 apiVersion: admitik.dev/v1alpha1
-kind: ClusterMutationPolicy
+kind: ClusterGenerationPolicy
 metadata:
   name: logging-generate-fluentbit-configmap-v1
 

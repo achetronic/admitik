@@ -2,6 +2,10 @@
 
 This solution implements an automatic centralized logging system for Kubernetes applications using FluentBit as a sidecar and Admitik as the policy engine. The system enables automatic collection, processing, and forwarding of container logs to a centralized destination (like FluentD or Elasticsearch) without the need to modify applications.
 
+> The generation policy also declares `rollouts.argoproj.io` as a watched resource. If Argo Rollouts
+> is not installed in the cluster, that watch retries forever and logs errors from the reflector.
+> Remove that entry from `watchedResources` if you do not use it.
+
 ## Overview
 
 The solution consists of three Admitik policies that work together to:

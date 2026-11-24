@@ -6,6 +6,10 @@ spec:
 
   overwriteExisting: true
 
+  # DeletionPolicy decides what happens to the generated objects when this policy is deleted.
+  # Keep leaves them in the cluster, Delete removes everything this policy wrote.
+  # deletionPolicy: Keep
+
   # Resources to be watched
   watchedResources:
     - group: ""
