@@ -31,7 +31,7 @@ spec:
 
         - args:
           {{- if and (.Values.controller.metrics.enabled) }}
-          - --metrics-bind-address=127.0.0.1:8080
+          - --metrics-bind-address=:8080
           {{- end }}
           - --health-probe-bind-address=:8081
           - --webhook-client-port=10250

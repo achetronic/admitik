@@ -39,7 +39,7 @@ controller:
   - --enable-special-labels
   - --exclude-admission-self-namespace
   - --excluded-admission-namespaces=kube-system
-  - --audit-interval=10m
+  - --compliance-scan-interval=10m
 
   # Define a list of environment variables used inside the controller
   # Ref: https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/#use-configmap-defined-environment-variables-in-pod-commands
@@ -130,10 +130,7 @@ controller:
 
   metrics:
     # Specify whether metrics should be exposed or not
-    enabled: false
-
-    # Specify whether RBAC proxy should protect metrics
-    rbacProtectionEnabled: false
+    enabled: true
 
     # Specifies configuration for a Service resource to expose the metrics
     service:
