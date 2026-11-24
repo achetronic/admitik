@@ -34,11 +34,11 @@ import (
 	"sigs.k8s.io/yaml"
 
 	//
-	"github.com/freepik-company/admitik/api/v1alpha1"
-	"github.com/freepik-company/admitik/internal/evaluator"
-	"github.com/freepik-company/admitik/internal/globals"
-	"github.com/freepik-company/admitik/internal/telemetry"
-	"github.com/freepik-company/admitik/internal/template"
+	"github.com/admitikcore/admitik/api/v1alpha1"
+	"github.com/admitikcore/admitik/internal/evaluator"
+	"github.com/admitikcore/admitik/internal/globals"
+	"github.com/admitikcore/admitik/internal/telemetry"
+	"github.com/admitikcore/admitik/internal/template"
 )
 
 // handleRequest handles the incoming requests

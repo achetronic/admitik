@@ -29,8 +29,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	//
-	"github.com/freepik-company/admitik/internal/certificates"
-	"github.com/freepik-company/admitik/internal/globals"
+	"github.com/admitikcore/admitik/internal/certificates"
+	"github.com/admitikcore/admitik/internal/globals"
 )
 
 const (

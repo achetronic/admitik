@@ -25,7 +25,7 @@ import (
 	"golang.org/x/exp/maps"
 
 	//
-	"github.com/freepik-company/admitik/internal/template"
+	"github.com/admitikcore/admitik/internal/template"
 )
 
 // Engine renders Go templates with the Helm-like function map

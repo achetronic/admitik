@@ -24,7 +24,7 @@ import (
 	"github.com/google/cel-go/cel"
 
 	//
-	"github.com/freepik-company/admitik/internal/template"
+	"github.com/admitikcore/admitik/internal/template"
 )
 
 // Expression evaluates the whole source as a single CEL expression

@@ -26,15 +26,15 @@ import (
 	dynamicFake "k8s.io/client-go/dynamic/fake"
 
 	//
-	"github.com/freepik-company/admitik/api/v1alpha1"
-	"github.com/freepik-company/admitik/internal/evaluator"
-	"github.com/freepik-company/admitik/internal/informer"
-	"github.com/freepik-company/admitik/internal/telemetry"
-	"github.com/freepik-company/admitik/internal/template"
-	"github.com/freepik-company/admitik/internal/template/cel"
-	"github.com/freepik-company/admitik/internal/template/gotmpl"
-	"github.com/freepik-company/admitik/internal/template/plain"
-	"github.com/freepik-company/admitik/internal/template/starlark"
+	"github.com/admitikcore/admitik/api/v1alpha1"
+	"github.com/admitikcore/admitik/internal/evaluator"
+	"github.com/admitikcore/admitik/internal/informer"
+	"github.com/admitikcore/admitik/internal/telemetry"
+	"github.com/admitikcore/admitik/internal/template"
+	"github.com/admitikcore/admitik/internal/template/cel"
+	"github.com/admitikcore/admitik/internal/template/gotmpl"
+	"github.com/admitikcore/admitik/internal/template/plain"
+	"github.com/admitikcore/admitik/internal/template/starlark"
 )
 
 type testPolicy struct {

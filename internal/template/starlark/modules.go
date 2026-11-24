@@ -39,7 +39,7 @@ import (
 	modStarletString "github.com/1set/starlet/lib/string"
 
 	//
-	modSelfYaml "github.com/freepik-company/admitik/internal/template/starlarkmods/yaml"
+	modSelfYaml "github.com/admitikcore/admitik/internal/template/starlarkmods/yaml"
 )
 
 // modules is loaded once. It does not depend on the evaluation context

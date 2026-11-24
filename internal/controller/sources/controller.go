@@ -31,9 +31,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	//
-	"github.com/freepik-company/admitik/internal/common"
-	"github.com/freepik-company/admitik/internal/informer"
-	policyStore "github.com/freepik-company/admitik/internal/policystore"
+	"github.com/admitikcore/admitik/internal/common"
+	"github.com/admitikcore/admitik/internal/informer"
+	policyStore "github.com/admitikcore/admitik/internal/policystore"
 )
 
 const (

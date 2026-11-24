@@ -27,8 +27,8 @@ import (
 	"k8s.io/client-go/rest"
 
 	//
-	"github.com/freepik-company/admitik/internal/informer"
-	policyStore "github.com/freepik-company/admitik/internal/policystore"
+	"github.com/admitikcore/admitik/internal/informer"
+	policyStore "github.com/admitikcore/admitik/internal/policystore"
 )
 
 // newUnreachableController builds a controller whose informers never sync, because the client

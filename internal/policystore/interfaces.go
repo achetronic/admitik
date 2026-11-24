@@ -17,8 +17,8 @@ limitations under the License.
 package policystore
 
 import (
-	"github.com/freepik-company/admitik/api/v1alpha1"
-	"github.com/freepik-company/admitik/internal/store/simple"
+	"github.com/admitikcore/admitik/api/v1alpha1"
+	"github.com/admitikcore/admitik/internal/store/simple"
 )
 
 // PolicyResourceI represents the minimal contract that all policy types must fulfill

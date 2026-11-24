@@ -2,14 +2,14 @@
 
 **Cloud native policy engine for Kubernetes**
 
-![GitHub go.mod Go version (subdirectory of monorepo)](https://img.shields.io/github/go-mod/go-version/freepik-company/admitik)
-![GitHub](https://img.shields.io/github/license/freepik-company/admitik)
+![GitHub go.mod Go version (subdirectory of monorepo)](https://img.shields.io/github/go-mod/go-version/admitikcore/admitik)
+![GitHub](https://img.shields.io/github/license/admitikcore/admitik)
 
 ![YouTube Channel Subscribers](https://img.shields.io/youtube/channel/subscribers/UCeSb3yfsPNNVr13YsYNvCAw?label=achetronic&link=http%3A%2F%2Fyoutube.com%2Fachetronic)
 ![GitHub followers](https://img.shields.io/github/followers/achetronic?label=achetronic&link=http%3A%2F%2Fgithub.com%2Fachetronic)
 ![X (formerly Twitter) Follow](https://img.shields.io/twitter/follow/achetronic?style=flat&logo=twitter&link=https%3A%2F%2Ftwitter.com%2Fachetronic)
 
-<img src="https://raw.githubusercontent.com/achetronic/admitik/master/docs/img/header.png" alt="Admitik Header (Main) logo." width="100%">
+<img src="https://raw.githubusercontent.com/admitikcore/admitik/master/docs/img/header.png" alt="Admitik Header (Main) logo." width="100%">
 
 
 Admitik is a cloud native policy engine for Kubernetes that lets you define policies 
@@ -19,6 +19,14 @@ It uses template engines (like CEL or Starlark) to apply logic, patch resources,
 — all directly inside your cluster.
 
 No new languages to learn. No sidecars. Just Kubernetes-native power. 💪
+
+> [!NOTE]
+> **Where this project comes from**
+>
+> Admitik was originally created at Magnific (formerly Freepik) by the maintainers of this
+> repository. When we left the company we lost access to the repository we had been working on, so
+> the same team is continuing the project here as a spin-off. Same engine, same ideas, and the
+> intention to keep improving it in the open for everyone.
 
 
 ## ✨ What Can Admitik Do?
@@ -134,7 +142,7 @@ HIDDEN UNTIL DOC PAGES ARE FULLY CRAFTED
 
 We will cover all the installation methods in documentation soon, in the meanwhile, instructions here!
 
-[Helm registry](https://freepik-company.github.io/admitik/)
+[Helm registry](https://admitikcore.github.io/admitik/)
 
 <!---
 HIDDEN UNTIL DOC PAGES ARE FULLY CRAFTED
@@ -150,15 +158,15 @@ Advanced usage guides, examples, and reference docs coming soon:
 
 All contributions are welcome! Whether you're reporting bugs, suggesting features, or submitting code — thank you! Here’s how to get involved:
 
-▸ [Open an issue](https://github.com/freepik-company/Admitik/issues/new) to report bugs or request features
+▸ [Open an issue](https://github.com/admitikcore/admitik/issues/new) to report bugs or request features
 
-▸ [Submit a pull request](https://github.com/freepik-company/Admitik/pulls) to contribute improvements
+▸ [Submit a pull request](https://github.com/admitikcore/admitik/pulls) to contribute improvements
 
 <!---
-▸ [Ask a question or start a discussion](https://github.com/freepik-company/Admitik/discussions)
+▸ [Ask a question or start a discussion](https://github.com/admitikcore/admitik/discussions)
 -->
 
-▸ [Check open milestones](https://github.com/freepik-company/Admitik/milestones) to see what’s coming
+▸ [Check open milestones](https://github.com/admitikcore/admitik/milestones) to see what’s coming
 
 ▸ [Read the architecture overview](./docs/architecture.md) to know what lives where
 ▸ [Read the contributing guide](./docs/CONTRIBUTING.md) to get started smoothly

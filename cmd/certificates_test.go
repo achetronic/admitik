@@ -27,7 +27,7 @@ import (
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 
 	//
-	"github.com/freepik-company/admitik/internal/globals"
+	"github.com/admitikcore/admitik/internal/globals"
 )
 
 func TestDNSNames(t *testing.T) {

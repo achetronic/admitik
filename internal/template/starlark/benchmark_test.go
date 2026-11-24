@@ -24,7 +24,7 @@ import (
 	starletconv "github.com/1set/starlet/dataconv"
 
 	//
-	"github.com/freepik-company/admitik/internal/template"
+	"github.com/admitikcore/admitik/internal/template"
 )
 
 // contextWithObjects builds a context holding 'count' source objects, similar to a policy

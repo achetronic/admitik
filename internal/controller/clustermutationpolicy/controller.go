@@ -33,9 +33,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	//
-	"github.com/freepik-company/admitik/api/v1alpha1"
-	"github.com/freepik-company/admitik/internal/controller"
-	policyStore "github.com/freepik-company/admitik/internal/policystore"
+	"github.com/admitikcore/admitik/api/v1alpha1"
+	"github.com/admitikcore/admitik/internal/controller"
+	policyStore "github.com/admitikcore/admitik/internal/policystore"
 )
 
 type ClusterMutationPolicyControllerOptions struct {

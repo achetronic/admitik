@@ -32,8 +32,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	//
-	"github.com/freepik-company/admitik/api/v1alpha1"
-	policyStore "github.com/freepik-company/admitik/internal/policystore"
+	"github.com/admitikcore/admitik/api/v1alpha1"
+	policyStore "github.com/admitikcore/admitik/internal/policystore"
 )
 
 func testScheme(t *testing.T) *runtime.Scheme {

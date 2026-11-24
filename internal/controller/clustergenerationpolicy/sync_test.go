@@ -26,8 +26,8 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 
 	//
-	"github.com/freepik-company/admitik/api/v1alpha1"
-	policyStore "github.com/freepik-company/admitik/internal/policystore"
+	"github.com/admitikcore/admitik/api/v1alpha1"
+	policyStore "github.com/admitikcore/admitik/internal/policystore"
 )
 
 // spyDeleter records the calls it receives

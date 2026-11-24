@@ -25,8 +25,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	//
-	"github.com/freepik-company/admitik/internal/common"
-	"github.com/freepik-company/admitik/internal/template"
+	"github.com/admitikcore/admitik/internal/common"
+	"github.com/admitikcore/admitik/internal/template"
 )
 
 // populatePolicyDataFromAdmission enriches the policy evaluation context with data from the admission request.

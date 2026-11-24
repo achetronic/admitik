@@ -27,8 +27,8 @@ import (
 	dynamicFake "k8s.io/client-go/dynamic/fake"
 
 	//
-	"github.com/freepik-company/admitik/internal/informer"
-	policyStore "github.com/freepik-company/admitik/internal/policystore"
+	"github.com/admitikcore/admitik/internal/informer"
+	policyStore "github.com/admitikcore/admitik/internal/policystore"
 )
 
 type testSourceProvider struct {

@@ -20,8 +20,8 @@ import (
 	"fmt"
 
 	//
-	"github.com/freepik-company/admitik/api/v1alpha1"
-	"github.com/freepik-company/admitik/internal/template"
+	"github.com/admitikcore/admitik/api/v1alpha1"
+	"github.com/admitikcore/admitik/internal/template"
 )
 
 // IsPassingConditions iterate over a list of templated conditions and return whether they are passing or not

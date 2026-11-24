@@ -31,8 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	//
-	"github.com/freepik-company/admitik/api/v1alpha1"
-	policyStore "github.com/freepik-company/admitik/internal/policystore"
+	"github.com/admitikcore/admitik/api/v1alpha1"
+	policyStore "github.com/admitikcore/admitik/internal/policystore"
 )
 
 func newTestReconciler(t *testing.T, elected <-chan struct{}, objects ...client.Object) (*ClusterValidationPolicyReconciler, *policyStore.PolicyStore[*v1alpha1.ClusterValidationPolicy]) {

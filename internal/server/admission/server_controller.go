@@ -28,11 +28,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	//
-	"github.com/freepik-company/admitik/api/v1alpha1"
-	"github.com/freepik-company/admitik/internal/evaluator"
-	policyStore "github.com/freepik-company/admitik/internal/policystore"
-	"github.com/freepik-company/admitik/internal/telemetry"
-	"github.com/freepik-company/admitik/internal/template"
+	"github.com/admitikcore/admitik/api/v1alpha1"
+	"github.com/admitikcore/admitik/internal/evaluator"
+	policyStore "github.com/admitikcore/admitik/internal/policystore"
+	"github.com/admitikcore/admitik/internal/telemetry"
+	"github.com/admitikcore/admitik/internal/template"
 )
 
 const (

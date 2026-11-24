@@ -30,7 +30,7 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 
 	//
-	"github.com/freepik-company/admitik/api/v1alpha1"
+	"github.com/admitikcore/admitik/api/v1alpha1"
 )
 
 var (

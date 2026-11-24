@@ -29,7 +29,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	//
-	"github.com/freepik-company/admitik/api/v1alpha1"
+	"github.com/admitikcore/admitik/api/v1alpha1"
 )
 
 // fieldManager is the server side apply manager that owns the fields of the generated objects

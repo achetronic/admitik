@@ -17,7 +17,7 @@ limitations under the License.
 package policystore
 
 import (
-	"github.com/freepik-company/admitik/internal/store/simple"
+	"github.com/admitikcore/admitik/internal/store/simple"
 )
 
 // PolicyStore holds the policies of a single type and exposes the mutations done over them

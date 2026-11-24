@@ -32,15 +32,15 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	//
-	"github.com/freepik-company/admitik/api/v1alpha1"
-	"github.com/freepik-company/admitik/internal/evaluator"
-	"github.com/freepik-company/admitik/internal/informer"
-	policyStore "github.com/freepik-company/admitik/internal/policystore"
-	"github.com/freepik-company/admitik/internal/template"
-	"github.com/freepik-company/admitik/internal/template/cel"
-	"github.com/freepik-company/admitik/internal/template/gotmpl"
-	"github.com/freepik-company/admitik/internal/template/plain"
-	"github.com/freepik-company/admitik/internal/template/starlark"
+	"github.com/admitikcore/admitik/api/v1alpha1"
+	"github.com/admitikcore/admitik/internal/evaluator"
+	"github.com/admitikcore/admitik/internal/informer"
+	policyStore "github.com/admitikcore/admitik/internal/policystore"
+	"github.com/admitikcore/admitik/internal/template"
+	"github.com/admitikcore/admitik/internal/template/cel"
+	"github.com/admitikcore/admitik/internal/template/gotmpl"
+	"github.com/admitikcore/admitik/internal/template/plain"
+	"github.com/admitikcore/admitik/internal/template/starlark"
 )
 
 func testEngines(t *testing.T) *template.Registry {

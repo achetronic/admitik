@@ -84,7 +84,7 @@ the process, the steps are described in the following recipe:
 
     ```console
     export VERSION="0.0.1"
-    export IMG="ghcr.io/freepik-company/admitik:v$VERSION"
+    export IMG="ghcr.io/admitikcore/admitik:v$VERSION"
     ```
 
 3. Generate and push the Docker image (published on Docker Hub).

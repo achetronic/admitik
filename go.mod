@@ -1,4 +1,4 @@
-module github.com/freepik-company/admitik
+module github.com/admitikcore/admitik
 
 go 1.24.2
 

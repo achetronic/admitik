@@ -24,7 +24,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	//
-	"github.com/freepik-company/admitik/api/v1alpha1"
+	"github.com/admitikcore/admitik/api/v1alpha1"
 )
 
 // The policy store must be usable by consumers that only care about sources

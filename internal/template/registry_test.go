@@ -22,11 +22,11 @@ import (
 	"testing"
 
 	//
-	"github.com/freepik-company/admitik/internal/template"
-	"github.com/freepik-company/admitik/internal/template/cel"
-	"github.com/freepik-company/admitik/internal/template/gotmpl"
-	"github.com/freepik-company/admitik/internal/template/plain"
-	"github.com/freepik-company/admitik/internal/template/starlark"
+	"github.com/admitikcore/admitik/internal/template"
+	"github.com/admitikcore/admitik/internal/template/cel"
+	"github.com/admitikcore/admitik/internal/template/gotmpl"
+	"github.com/admitikcore/admitik/internal/template/plain"
+	"github.com/admitikcore/admitik/internal/template/starlark"
 )
 
 func mustRegistry(t *testing.T) *template.Registry {

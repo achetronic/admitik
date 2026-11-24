@@ -22,7 +22,7 @@ import (
 	"strings"
 
 	//
-	"github.com/freepik-company/admitik/internal/template"
+	"github.com/admitikcore/admitik/internal/template"
 )
 
 var placeholderRegex = regexp.MustCompile(`{{cel:\s*([\s\S]*?)\s*}}`)

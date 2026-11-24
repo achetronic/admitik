@@ -30,7 +30,7 @@ import (
 	dynamicFake "k8s.io/client-go/dynamic/fake"
 
 	//
-	"github.com/freepik-company/admitik/api/v1alpha1"
+	"github.com/admitikcore/admitik/api/v1alpha1"
 )
 
 var configMapsGVR = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "configmaps"}

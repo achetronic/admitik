@@ -17,7 +17,7 @@ limitations under the License.
 package plain
 
 import (
-	"github.com/freepik-company/admitik/internal/template"
+	"github.com/admitikcore/admitik/internal/template"
 )
 
 // Engine returns the source untouched. It is used for templates that do not need evaluation

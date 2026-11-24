@@ -28,7 +28,7 @@ import (
 	"go.starlark.net/starlark"
 
 	//
-	"github.com/freepik-company/admitik/internal/template"
+	"github.com/admitikcore/admitik/internal/template"
 )
 
 // concurrentEvaluations is how many admission requests are simulated at the same time

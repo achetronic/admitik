@@ -27,12 +27,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	//
-	"github.com/freepik-company/admitik/api/v1alpha1"
-	"github.com/freepik-company/admitik/internal/common"
-	"github.com/freepik-company/admitik/internal/evaluator"
-	"github.com/freepik-company/admitik/internal/kubeapply"
-	"github.com/freepik-company/admitik/internal/policystore"
-	"github.com/freepik-company/admitik/internal/template"
+	"github.com/admitikcore/admitik/api/v1alpha1"
+	"github.com/admitikcore/admitik/internal/common"
+	"github.com/admitikcore/admitik/internal/evaluator"
+	"github.com/admitikcore/admitik/internal/kubeapply"
+	"github.com/admitikcore/admitik/internal/policystore"
+	"github.com/admitikcore/admitik/internal/template"
 )
 
 const (

@@ -26,7 +26,7 @@ import (
 	"go.starlark.net/starlark"
 
 	//
-	"github.com/freepik-company/admitik/internal/template"
+	"github.com/admitikcore/admitik/internal/template"
 )
 
 // Engine evaluates Starlark scripts. Whatever the script prints is returned as the result

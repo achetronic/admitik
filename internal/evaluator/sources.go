@@ -30,10 +30,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	//
-	"github.com/freepik-company/admitik/api/v1alpha1"
-	"github.com/freepik-company/admitik/internal/informer"
-	"github.com/freepik-company/admitik/internal/policystore"
-	"github.com/freepik-company/admitik/internal/template"
+	"github.com/admitikcore/admitik/api/v1alpha1"
+	"github.com/admitikcore/admitik/internal/informer"
+	"github.com/admitikcore/admitik/internal/policystore"
+	"github.com/admitikcore/admitik/internal/template"
 )
 
 // versionOf returns a short identifier for the injected sources, empty when there are none
