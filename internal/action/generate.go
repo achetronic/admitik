@@ -78,12 +78,18 @@ func (g *Generate) Process(
 			Operation: operation,
 		}
 
+		// The object that woke the policy up, until something is written
+		trigger := common.ObjectRefOfObject(object[0])
+
 		outcome, reason, objects, err := g.generate(ctx, policy, eventType, object, &line)
 		line.Result = outcome
 		line.Reason = reason
 		line.Err = err
 
-		telemetry.LogDecision(logger, line, "duration", time.Since(started).String())
+		extra := []any{"duration", time.Since(started).String()}
+		extra = append(extra, triggerField(line, trigger)...)
+
+		telemetry.LogDecision(logger, line, extra...)
 
 		g.dependencies.Metrics.Evaluation(telemetry.KindGenerate, policy.Name, time.Since(started), objects)
 		g.dependencies.Metrics.Decision(telemetry.Decision{
@@ -167,6 +173,18 @@ func (g *Generate) generate(
 	}
 
 	return telemetry.OutcomeGenerated, telemetry.ReasonNone, sources, nil
+}
+
+// triggerField names the object that woke the policy up, and only when it is not the object the
+// policy acted on. A cleanup policy removes the object that triggered it, so there is nothing to
+// tell apart
+func triggerField(line telemetry.DecisionLine, trigger common.ObjectRef) []any {
+
+	if line.Object == trigger {
+		return nil
+	}
+
+	return []any{telemetry.FieldTrigger, trigger}
 }
 
 // watchedResourceLabel formats the watched resource, expressed as

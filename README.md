@@ -11,6 +11,13 @@
 
 <img src="https://raw.githubusercontent.com/admitikcore/admitik/master/docs/img/header.png" alt="Admitik Header (Main) logo." width="100%">
 
+> [!NOTE]
+> **Where this project comes from**
+>
+> Admitik was originally created at Magnific (formerly Freepik) by the maintainers of this
+> repository. When we left the company we lost access to the repository we had been working on, so
+> the same team is continuing the project here as a spin-off. Same engine, same ideas, and the
+> intention to keep improving it in the open for everyone.
 
 Admitik is a cloud native policy engine for Kubernetes that lets you define policies 
 to **validate**, **mutate**, **generate**, **clone**, or **clean** resources. 
@@ -19,14 +26,6 @@ It uses template engines (like CEL or Starlark) to apply logic, patch resources,
 — all directly inside your cluster.
 
 No new languages to learn. No sidecars. Just Kubernetes-native power. 💪
-
-> [!NOTE]
-> **Where this project comes from**
->
-> Admitik was originally created at Magnific (formerly Freepik) by the maintainers of this
-> repository. When we left the company we lost access to the repository we had been working on, so
-> the same team is continuing the project here as a spin-off. Same engine, same ideas, and the
-> intention to keep improving it in the open for everyone.
 
 
 ## ✨ What Can Admitik Do?

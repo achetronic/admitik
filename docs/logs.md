@@ -18,16 +18,20 @@ This file is the contract. Code in `internal/telemetry/log.go`, tests in
 | `policy` | string | The policy that was involved |
 | `policyKind` | string | `validate`, `mutate` or `generate` |
 | `operation` | string | `CREATE`, `UPDATE` or `DELETE` |
-| `object` | object | The object: `apiVersion`, `kind`, `name`, and `namespace` when it is namespaced |
+| `object` | object | The object the policy acted on: `apiVersion`, `kind`, `name`, and `namespace` when it is namespaced |
 | `result` | string | What came out, see below |
 | `reason` | string | Why, in a closed set: `none`, `sources`, `conditions`, `template`, `patch`, `apply` |
 | `message` | string | Optional. Why, in words. Only when there is something to say |
 
-Generation lines add one field:
+When the object a policy acts on is not the one that woke it up, the line adds one field:
 
 | Field | Type | Meaning |
 |:--|:--|:--|
 | `trigger` | object | The object that woke the policy up, same shape as `object` |
+
+Generation writes it, because a `Namespace` wakes a policy that writes a `NetworkPolicy`. A cleanup
+policy will not, because it removes the object that triggered it: `object` and `trigger` would be
+the same thing. Cloning writes it, because the source and the copy are different objects.
 
 Lines may also carry `duration` and, for generated objects, `created`. They are informative and may
 be absent.

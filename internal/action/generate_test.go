@@ -33,6 +33,7 @@ import (
 
 	//
 	"github.com/admitikcore/admitik/api/v1alpha1"
+	"github.com/admitikcore/admitik/internal/common"
 	"github.com/admitikcore/admitik/internal/evaluator"
 	"github.com/admitikcore/admitik/internal/informer"
 	"github.com/admitikcore/admitik/internal/kubeapply"
@@ -239,5 +240,23 @@ func TestWatchedResourceLabel(t *testing.T) {
 		if got := watchedResourceLabel(watched); got != expected {
 			t.Errorf("got %q for %q, expected %q", got, watched, expected)
 		}
+	}
+}
+
+func TestTriggerIsOnlyNamedWhenItIsAnotherObject(t *testing.T) {
+	namespace := common.ObjectRef{APIVersion: "v1", Kind: "Namespace", Name: "team-c"}
+	policy := common.ObjectRef{
+		APIVersion: "networking.k8s.io/v1", Kind: "NetworkPolicy", Namespace: "team-c", Name: "default-deny",
+	}
+
+	// What generation does: the policy writes something else than what woke it up
+	fields := triggerField(telemetry.DecisionLine{Object: policy}, namespace)
+	if len(fields) != 2 || fields[0] != telemetry.FieldTrigger || fields[1] != namespace {
+		t.Errorf("got %v, expected the trigger", fields)
+	}
+
+	// What a cleanup policy will do: it removes the object that woke it up
+	if fields := triggerField(telemetry.DecisionLine{Object: namespace}, namespace); fields != nil {
+		t.Errorf("got %v, expected no trigger", fields)
 	}
 }

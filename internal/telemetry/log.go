@@ -35,6 +35,10 @@ const (
 	FieldReason     = "reason"
 	FieldMessage    = "message"
 
+	// FieldTrigger names the object that woke a policy up, when it is not the object the policy
+	// acted on
+	FieldTrigger = "trigger"
+
 	// MessagePolicyDecision is the message of every line that describes a decision
 	MessagePolicyDecision = "policy decision"
 )
