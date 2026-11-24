@@ -33,7 +33,7 @@ import (
 
 	//
 	"github.com/freepik-company/admitik/api/v1alpha1"
-	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
+	policyStore "github.com/freepik-company/admitik/internal/policystore"
 )
 
 func testScheme(t *testing.T) *runtime.Scheme {

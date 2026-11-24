@@ -33,7 +33,7 @@ import (
 	//
 	"github.com/freepik-company/admitik/internal/common"
 	"github.com/freepik-company/admitik/internal/informer"
-	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
+	policyStore "github.com/freepik-company/admitik/internal/policystore"
 )
 
 const (

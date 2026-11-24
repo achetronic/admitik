@@ -35,7 +35,7 @@ import (
 	"github.com/freepik-company/admitik/api/v1alpha1"
 	"github.com/freepik-company/admitik/internal/evaluator"
 	"github.com/freepik-company/admitik/internal/informer"
-	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
+	policyStore "github.com/freepik-company/admitik/internal/policystore"
 	"github.com/freepik-company/admitik/internal/template"
 	"github.com/freepik-company/admitik/internal/template/cel"
 	"github.com/freepik-company/admitik/internal/template/gotmpl"

@@ -160,6 +160,7 @@ All contributions are welcome! Whether you're reporting bugs, suggesting feature
 
 ▸ [Check open milestones](https://github.com/freepik-company/Admitik/milestones) to see what’s coming
 
+▸ [Read the architecture overview](./docs/architecture.md) to know what lives where
 ▸ [Read the contributing guide](./docs/CONTRIBUTING.md) to get started smoothly
 
 

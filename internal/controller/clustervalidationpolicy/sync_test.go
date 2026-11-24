@@ -32,7 +32,7 @@ import (
 
 	//
 	"github.com/freepik-company/admitik/api/v1alpha1"
-	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
+	policyStore "github.com/freepik-company/admitik/internal/policystore"
 )
 
 func newTestReconciler(t *testing.T, elected <-chan struct{}, objects ...client.Object) (*ClusterValidationPolicyReconciler, *policyStore.PolicyStore[*v1alpha1.ClusterValidationPolicy]) {

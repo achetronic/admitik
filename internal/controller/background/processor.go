@@ -14,24 +14,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package resourceobserver
+package background
 
-import "sync"
+import (
+	"context"
 
-// ResourceTypeName represents TODO
-// The pattern will be: {group}/{version}/{resource}/{namespace}/{name}
-type ResourceTypeName = string
+	//
+	"k8s.io/apimachinery/pkg/watch"
+)
 
-// ResourceObserverGroup wraps status of a group of observers.
-type ResourceObserverGroup struct {
-	mu sync.Mutex
-
-	// observers represents the audience for a group of resources
-	observers []string
-}
-
-// ResourceObserverRegistry manage observers
-type ResourceObserverRegistry struct {
-	mu        sync.Mutex
-	observers map[ResourceTypeName]*ResourceObserverGroup
+// Processor reacts to the events of a watched resource. The background controller only knows when
+// something happened; what to do with it belongs to the processor
+type Processor interface {
+	Process(ctx context.Context, resourceType string, eventType watch.EventType, object ...map[string]any)
 }

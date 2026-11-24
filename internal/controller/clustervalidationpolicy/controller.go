@@ -35,7 +35,7 @@ import (
 	//
 	"github.com/freepik-company/admitik/api/v1alpha1"
 	"github.com/freepik-company/admitik/internal/controller"
-	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
+	policyStore "github.com/freepik-company/admitik/internal/policystore"
 )
 
 type ClusterValidationPolicyControllerOptions struct {

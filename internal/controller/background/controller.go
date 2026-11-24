@@ -14,17 +14,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package observedresource
+package background
 
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
 
 	//
-	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
@@ -34,11 +34,8 @@ import (
 
 	//
 	"github.com/freepik-company/admitik/api/v1alpha1"
-	"github.com/freepik-company/admitik/internal/evaluator"
 	"github.com/freepik-company/admitik/internal/informer"
-	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
-	resourceObserverRegistry "github.com/freepik-company/admitik/internal/registry/resourceobserver"
-	"github.com/freepik-company/admitik/internal/template"
+	policyStore "github.com/freepik-company/admitik/internal/policystore"
 )
 
 const (
@@ -48,7 +45,7 @@ const (
 	secondsToReconcileInformersAgain = 2 * time.Second
 
 	//
-	controllerName = "observedresource"
+	controllerName = "background"
 
 	// consumerName identifies this controller inside the pool, so it only releases its own watches
 	consumerName = "observedresource"
@@ -59,13 +56,13 @@ const (
 	resourceInformerParsingError = "Failed to parse the watched resource. Does it look like {group}/{version}/{resource}/{namespace}/{name}?"
 )
 
-// ObservedResourceControllerOptions represents available options that can be passed to ObservedResourceController on start
-type ObservedResourceControllerOptions struct {
+// Options represents available options that can be passed to Controller on start
+type Options struct {
 	// Duration to wait until resync all the objects
 	InformerDurationToResync time.Duration
 }
 
-type ObservedResourceControllerDependencies struct {
+type Dependencies struct {
 	Context *context.Context
 
 	//
@@ -74,22 +71,14 @@ type ObservedResourceControllerDependencies struct {
 	// Pool owns the informers, shared with the rest of the controllers
 	Pool *informer.Pool
 
-	ResourceObserverRegistry *resourceObserverRegistry.ResourceObserverRegistry
-
-	// Engines renders the conditions and the generated objects
-	Engines *template.Registry
-
-	// Evaluator prepares the context of the policies and checks their conditions
-	Evaluator *evaluator.Evaluator
-
-	// RESTMapper resolves the resource of the kind a template rendered
-	RESTMapper meta.RESTMapper
+	// Processors react to the events of the watched resources, indexed by the name the policies use
+	Processors map[string]Processor
 }
 
-// ObservedResourceController represents the controller that triggers parallel threads.
+// Controller represents the controller that triggers parallel threads.
 // These threads process coming events against the conditions defined in TODO
 // Each thread is an informer in charge of a group of resources GVRNN (Group + Version + Resource + Namespace + Name)
-type ObservedResourceController struct {
+type Controller struct {
 	// Following interface is just needed to register this controller into Controller Runtime manager and let it
 	// launch the controller across all the Admitik replicas or just in the elected leader.
 	manager.LeaderElectionRunnable
@@ -97,23 +86,24 @@ type ObservedResourceController struct {
 	//
 	Client client.Client
 
-	Options      ObservedResourceControllerOptions
-	Dependencies ObservedResourceControllerDependencies
+	Options      Options
+	Dependencies Dependencies
 
 	// Carried stuff
 	dispatcher *EventDispatcher
+	observers  *observers
 }
 
 // NeedLeaderElection implements manager.LeaderElectionRunnable.
 // This is needed to inform Controller Runtime manager whether this controller needs a leader or not.
-func (r *ObservedResourceController) NeedLeaderElection() bool {
+func (r *Controller) NeedLeaderElection() bool {
 	return true
 }
 
 // getResourcesFromPolicyRegistries returns a list of observers for each type of resource that is required to be watched
 // Example: map[resourceType][]Observers
 // TODO: Improve docs
-func (r *ObservedResourceController) getResourcesFromPolicyRegistries() map[string][]string {
+func (r *Controller) getResourcesFromPolicyRegistries() map[string][]string {
 
 	results := make(map[string][]string)
 
@@ -129,19 +119,19 @@ func (r *ObservedResourceController) getResourcesFromPolicyRegistries() map[stri
 	return results
 }
 
-// Start launches the ObservedResourceController and keeps it alive
+// Start launches the Controller and keeps it alive
 // It kills the controller on application's context death, and rerun the process when failed
-func (r *ObservedResourceController) Start(ctx context.Context) error {
+func (r *Controller) Start(ctx context.Context) error {
 	logger := log.FromContext(*r.Dependencies.Context).WithValues("controller", controllerName)
 	logger.Info("Starting Controller")
 
 	// Create an event dispatcher for later usage
+	r.observers = newObservers()
+
 	r.dispatcher = NewEventDispatcher(EventDispatcherDependencies{
-		ClusterGenerationPolicyRegistry: r.Dependencies.ClusterGenerationPolicyRegistry,
-		ResourceObserverRegistry:        r.Dependencies.ResourceObserverRegistry,
-		Engines:                         r.Dependencies.Engines,
-		Evaluator:                       r.Dependencies.Evaluator,
-		RESTMapper:                      r.Dependencies.RESTMapper,
+		Context:    *r.Dependencies.Context,
+		Observers:  r.observers,
+		Processors: r.Dependencies.Processors,
 	})
 
 	ticker := time.NewTicker(secondsToReconcileInformersAgain)
@@ -164,12 +154,12 @@ func (r *ObservedResourceController) Start(ctx context.Context) error {
 
 // reconcileInformers makes sure there is a watch for every resource some policy needs to observe,
 // and releases the ones nobody needs anymore
-func (r *ObservedResourceController) reconcileInformers() {
+func (r *Controller) reconcileInformers() {
 	logger := log.FromContext(*r.Dependencies.Context).WithValues("controller", controllerName)
 
 	watched := r.getResourcesFromPolicyRegistries()
 
-	for resourceType, observers := range watched {
+	for resourceType, processors := range watched {
 
 		scope, err := scopeFromString(resourceType)
 		if err != nil {
@@ -177,8 +167,8 @@ func (r *ObservedResourceController) reconcileInformers() {
 			continue
 		}
 
-		// Store the observers that have to be triggered by this resource
-		r.Dependencies.ResourceObserverRegistry.SetObservers(resourceType, observers)
+		// Store the processors that have to be triggered by this resource
+		r.observers.set(resourceType, processors)
 
 		if _, err := r.Dependencies.Pool.Ensure(consumerName, scope, r.dispatchTo(resourceType)); err != nil {
 			logger.Error(err, "Failed ensuring the informer", "resource", resourceType)
@@ -191,10 +181,12 @@ func (r *ObservedResourceController) reconcileInformers() {
 			r.Dependencies.Pool.Release(consumerName, scope)
 		}
 	}
+
+	r.observers.forget(slices.Collect(maps.Keys(watched)))
 }
 
 // dispatchTo returns the handler that forwards the events of a watched resource to its observers
-func (r *ObservedResourceController) dispatchTo(resourceType string) informer.EventHandlerFunc {
+func (r *Controller) dispatchTo(resourceType string) informer.EventHandlerFunc {
 
 	return func(eventType watch.EventType, obj *unstructured.Unstructured, oldObj *unstructured.Unstructured) error {
 

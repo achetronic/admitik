@@ -28,7 +28,7 @@ import (
 
 	//
 	"github.com/freepik-company/admitik/internal/informer"
-	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
+	policyStore "github.com/freepik-company/admitik/internal/policystore"
 )
 
 // newUnreachableController builds a controller whose informers never sync, because the client

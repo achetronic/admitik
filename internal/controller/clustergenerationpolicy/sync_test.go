@@ -27,7 +27,7 @@ import (
 
 	//
 	"github.com/freepik-company/admitik/api/v1alpha1"
-	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
+	policyStore "github.com/freepik-company/admitik/internal/policystore"
 )
 
 // spyDeleter records the calls it receives

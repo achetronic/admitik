@@ -45,20 +45,21 @@ import (
 
 	//
 	"github.com/freepik-company/admitik/api/v1alpha1"
+	"github.com/freepik-company/admitik/internal/action"
 	"github.com/freepik-company/admitik/internal/audit"
 	"github.com/freepik-company/admitik/internal/cascade"
 	"github.com/freepik-company/admitik/internal/certificates"
 	"github.com/freepik-company/admitik/internal/controller"
+	"github.com/freepik-company/admitik/internal/controller/background"
 	"github.com/freepik-company/admitik/internal/controller/clustergenerationpolicy"
 	"github.com/freepik-company/admitik/internal/controller/clustermutationpolicy"
 	"github.com/freepik-company/admitik/internal/controller/clustervalidationpolicy"
-	"github.com/freepik-company/admitik/internal/controller/observedresource"
 	"github.com/freepik-company/admitik/internal/controller/sources"
 	"github.com/freepik-company/admitik/internal/evaluator"
 	"github.com/freepik-company/admitik/internal/globals"
 	"github.com/freepik-company/admitik/internal/informer"
-	policyStore "github.com/freepik-company/admitik/internal/registry/policystore"
-	resourceObserverRegistry "github.com/freepik-company/admitik/internal/registry/resourceobserver"
+	"github.com/freepik-company/admitik/internal/kubeapply"
+	policyStore "github.com/freepik-company/admitik/internal/policystore"
 	"github.com/freepik-company/admitik/internal/server/admission"
 	"github.com/freepik-company/admitik/internal/telemetry"
 	"github.com/freepik-company/admitik/internal/template"
@@ -386,7 +387,6 @@ func main() {
 	clusterValidationPolicyReg := policyStore.NewPolicyStore[*v1alpha1.ClusterValidationPolicy]()
 	clusterMutationPolicyReg := policyStore.NewPolicyStore[*v1alpha1.ClusterMutationPolicy]()
 	clusterGenerationPolicyReg := policyStore.NewPolicyStore[*v1alpha1.ClusterGenerationPolicy]()
-	resourceObserverReg := resourceObserverRegistry.NewResourceObserverRegistry()
 
 	// One pool of informers shared by every controller: a resource type is watched once per pod
 	informersPool := informer.NewPool(
@@ -396,6 +396,14 @@ func main() {
 
 	// Evaluator used by every policy type to prepare its context and check its conditions
 	policyEvaluator := evaluator.New(engines, informersPool)
+
+	// Action that renders and writes the objects of the ClusterGenerationPolicy resources
+	generateAction := action.NewGenerate(action.GenerateDependencies{
+		Policies:  clusterGenerationPolicyReg,
+		Evaluator: policyEvaluator,
+		Engines:   engines,
+		Writer:    kubeapply.NewWriter(globals.Application.KubeRawClient, mgr.GetRESTMapper()),
+	})
 
 	// Init internal registries controllers
 	// Following controllers manage internal registries for user-facing resources.
@@ -480,27 +488,25 @@ func main() {
 
 	// +kubebuilder:scaffold:builder
 
-	// Init ObservedResourceController.
-	// This controller launches watchers for resource types expressed in 'watchedResources' section of some CRs,
-	// and executes suitable processors for them.
-	// This is used in resources such as ClusterGenerationPolicy, ClusterCleanPolicy, etc.
-	observedResourceController := observedresource.ObservedResourceController{
+	// Init BackgroundController.
+	// It watches the resources expressed in the 'watchedResources' section of the policies and hands
+	// their events to the actions that asked for them
+	backgroundController := background.Controller{
 		Client: mgr.GetClient(),
-		Options: observedresource.ObservedResourceControllerOptions{
+		Options: background.Options{
 			InformerDurationToResync: sourcesTimeToResyncInformers,
 		},
-		Dependencies: observedresource.ObservedResourceControllerDependencies{
+		Dependencies: background.Dependencies{
 			Context:                         &globals.Application.Context,
 			ClusterGenerationPolicyRegistry: clusterGenerationPolicyReg,
 			Pool:                            informersPool,
-			ResourceObserverRegistry:        resourceObserverReg,
-			Engines:                         engines,
-			Evaluator:                       policyEvaluator,
-			RESTMapper:                      mgr.GetRESTMapper(),
+			Processors: map[string]background.Processor{
+				background.ObserverTypeClusterGenerationPolicies: generateAction,
+			},
 		},
 	}
-	if err = mgr.Add(&observedResourceController); err != nil {
-		setupLog.Error(err, "failed adding observed resources controller to manager")
+	if err = mgr.Add(&backgroundController); err != nil {
+		setupLog.Error(err, "failed adding the background controller to the manager")
 		os.Exit(1)
 	}
 
