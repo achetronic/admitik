@@ -41,8 +41,8 @@ import (
 	//
 	"github.com/admitikcore/admitik/api/v1alpha1"
 	"github.com/admitikcore/admitik/internal/action"
-	"github.com/admitikcore/admitik/internal/audit"
 	"github.com/admitikcore/admitik/internal/cascade"
+	"github.com/admitikcore/admitik/internal/compliance"
 	"github.com/admitikcore/admitik/internal/controller"
 	"github.com/admitikcore/admitik/internal/controller/background"
 	"github.com/admitikcore/admitik/internal/controller/clustergenerationpolicy"
@@ -108,7 +108,7 @@ func main() {
 	var excludeAdmissionSelfNamespace bool
 	var excludedAdmissionNamespaces string
 
-	var auditInterval time.Duration
+	var complianceScanInterval time.Duration
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metric endpoint binds to. "+
 		"Use the port :8080. If not set, it will be 0 in order to disable the metrics server")
@@ -161,7 +161,7 @@ func main() {
 	flag.StringVar(&excludedAdmissionNamespaces, "excluded-admission-namespaces", "",
 		"Comma-separated list of namespaces to be excluded from admission evaluations. Commonly used for 'kube-system'")
 
-	flag.DurationVar(&auditInterval, "audit-interval", 0,
+	flag.DurationVar(&complianceScanInterval, "compliance-scan-interval", 0,
 		"Interval between compliance scans over the objects that already exist. Zero disables them")
 
 	// Ref: https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/log/zap@v0.21.0#Options.BindFlags
@@ -308,6 +308,7 @@ func main() {
 		Evaluator: policyEvaluator,
 		Engines:   engines,
 		Writer:    kubeapply.NewWriter(globals.Application.KubeRawClient, mgr.GetRESTMapper()),
+		Metrics:   telemetryRecorder,
 	})
 
 	// Init internal registries controllers
@@ -468,18 +469,38 @@ func main() {
 	}
 
 	// Init the compliance scans. They evaluate the validation policies over the existing objects
-	// and write one aggregated report. Disabled when the interval is zero
-	if auditInterval > 0 {
-		auditScanner := audit.NewScanner(audit.ScannerOptions{}, audit.ScannerDependencies{
+	// and publish the outcome as metrics. Disabled when the interval is zero
+	if complianceScanInterval > 0 {
+		complianceScanner := compliance.NewScanner(compliance.ScannerOptions{}, compliance.ScannerDependencies{
 			Client:    mgr.GetClient(),
 			Dynamic:   globals.Application.KubeRawClient,
 			Evaluator: policyEvaluator,
 		})
 
-		if err = mgr.Add(audit.Runner{Interval: auditInterval, Scanner: auditScanner}); err != nil {
-			setupLog.Error(err, "failed adding the audit scanner to the manager")
+		runner := compliance.Runner{
+			Interval: complianceScanInterval,
+			Scanner:  complianceScanner,
+			Metrics:  telemetryRecorder,
+		}
+		if err = mgr.Add(runner); err != nil {
+			setupLog.Error(err, "failed adding the compliance scanner to the manager")
 			os.Exit(1)
 		}
+	}
+
+	// Publish how many policies are loaded, so losing all of them is visible without a request
+	policyCollector := telemetry.Collector{
+		Interval: 30 * time.Second,
+		Recorder: telemetryRecorder,
+		Counters: map[telemetry.Kind]telemetry.PolicyCounter{
+			telemetry.KindValidate: clusterValidationPolicyReg.Policies,
+			telemetry.KindMutate:   clusterMutationPolicyReg.Policies,
+			telemetry.KindGenerate: clusterGenerationPolicyReg.Policies,
+		},
+	}
+	if err = mgr.Add(policyCollector); err != nil {
+		setupLog.Error(err, "failed adding the policy metrics collector to the manager")
+		os.Exit(1)
 	}
 
 	//

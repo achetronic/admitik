@@ -19,6 +19,8 @@ package action
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	//
 	"github.com/go-logr/logr"
@@ -32,18 +34,13 @@ import (
 	"github.com/admitikcore/admitik/internal/evaluator"
 	"github.com/admitikcore/admitik/internal/kubeapply"
 	"github.com/admitikcore/admitik/internal/policystore"
+	"github.com/admitikcore/admitik/internal/telemetry"
 	"github.com/admitikcore/admitik/internal/template"
 )
 
 const (
 	// GenerationPolicyKind is written on the generated objects as their origin
 	GenerationPolicyKind = "ClusterGenerationPolicy"
-
-	//
-	templateFailureMessage = "Generation template failed. More info in controller logs."
-	objectFailureMessage   = "Invalid object after template. More info in controller logs."
-	writeFailureMessage    = "Object write after template failed. More info in controller logs."
-	existingObjectMessage  = "The object already exists and 'overwriteExisting' is disabled"
 )
 
 // Generate writes the object a ClusterGenerationPolicy renders for an event
@@ -56,6 +53,8 @@ type GenerateDependencies struct {
 	Evaluator *evaluator.Evaluator
 	Engines   *template.Registry
 	Writer    *kubeapply.Writer
+
+	Metrics *telemetry.Recorder
 }
 
 func NewGenerate(dependencies GenerateDependencies) *Generate {
@@ -67,39 +66,39 @@ func (g *Generate) Process(
 	ctx context.Context, resourceType string, eventType watch.EventType, object ...map[string]any) {
 
 	logger := log.FromContext(ctx).WithValues("action", "generate", "watched", resourceType)
+	resource := watchedResourceLabel(resourceType)
 
-	policies := g.dependencies.Policies.Store.GetResources(resourceType)
-	for _, policy := range policies {
+	for _, policy := range g.dependencies.Policies.Store.GetResources(resourceType) {
 
-		policyLogger := logger.WithValues(GenerationPolicyKind, policy.Name)
+		policyLogger := logger.WithValues("policy", policy.Name, "kind", GenerationPolicyKind)
+		started := time.Now()
 
-		userMessage, err := g.generate(ctx, policyLogger, policy, eventType, object)
+		outcome, reason, objects, err := g.generate(ctx, policyLogger, policy, eventType, object)
 		if err != nil {
-			policyLogger.Info(err.Error())
+			policyLogger.Error(err, "the object could not be generated", "reason", reason)
 		}
 
-		// The user is told why the object is not there, in the namespace of the object that was watched
-		if userMessage == "" {
-			continue
-		}
-
-		eventErr := common.CreateKubeEvent(ctx, common.EventNamespace(object[0]), "resources-controller",
-			object[0], *policy, "GenerationAborted", userMessage)
-		if eventErr != nil {
-			policyLogger.Info(fmt.Sprintf("failed creating Kubernetes event: %s", eventErr.Error()))
-		}
+		g.dependencies.Metrics.Evaluation(telemetry.KindGenerate, policy.Name, time.Since(started), objects)
+		g.dependencies.Metrics.Decision(telemetry.Decision{
+			Kind:      telemetry.KindGenerate,
+			Policy:    policy.Name,
+			Operation: common.GetNormalizedOperation(eventType),
+			Resource:  resource,
+			Outcome:   outcome,
+			Reason:    reason,
+		})
 	}
 }
 
-// generate renders the object of one policy and writes it.
-// It returns the message shown to the user when the object could not be written, if any
+// generate renders the object of one policy and writes it. It returns what happened, how many
+// source objects were injected and the error, if any
 func (g *Generate) generate(
 	ctx context.Context,
 	logger logr.Logger,
 	policy *v1alpha1.ClusterGenerationPolicy,
 	eventType watch.EventType,
 	object []map[string]any,
-) (string, error) {
+) (telemetry.Outcome, telemetry.Reason, int, error) {
 
 	data := template.NewInjectedData()
 	data.Operation = common.GetNormalizedOperation(eventType)
@@ -112,23 +111,35 @@ func (g *Generate) generate(
 		Policy:     policy,
 		Conditions: policy.Spec.Conditions,
 	}, data)
+
+	sources := countSources(data)
 	if prepared.Err != nil {
-		logger.Info("policy could not be prepared", "reason", prepared.Reason, "error", prepared.Err.Error())
+		logger.V(1).Info("the conditions of the policy could not be prepared",
+			"reason", prepared.Reason, "error", prepared.Err.Error())
 	}
 
 	if !prepared.Passed {
-		return "", nil
+		// A policy whose conditions do not match is not an error, but it is not the same as an
+		// object that was already there
+		reason := telemetry.ReasonConditions
+		if prepared.Err != nil {
+			reason = prepared.Reason
+		}
+
+		return telemetry.OutcomeSkipped, reason, sources, nil
 	}
 
 	rendered, err := g.dependencies.Engines.Evaluate(
 		policy.Spec.Object.Definition.Engine, policy.Spec.Object.Definition.Template, data)
 	if err != nil {
-		return templateFailureMessage, fmt.Errorf("error rendering the object of '%s': %w", policy.Name, err)
+		return telemetry.OutcomeFailed, telemetry.ReasonTemplate, sources,
+			fmt.Errorf("error rendering the object of '%s': %w", policy.Name, err)
 	}
 
 	definition := map[string]any{}
 	if err = yaml.Unmarshal([]byte(rendered), &definition); err != nil {
-		return objectFailureMessage, fmt.Errorf("error decoding the rendered object of '%s': %w", policy.Name, err)
+		return telemetry.OutcomeFailed, telemetry.ReasonTemplate, sources,
+			fmt.Errorf("error decoding the rendered object of '%s': %w", policy.Name, err)
 	}
 
 	result, err := g.dependencies.Writer.Apply(ctx, kubeapply.Options{
@@ -137,15 +148,40 @@ func (g *Generate) generate(
 		Overwrite:  policy.Spec.OverwriteExisting,
 	}, definition)
 	if err != nil {
-		return writeFailureMessage, fmt.Errorf("error writing the object of '%s': %w", policy.Name, err)
+		return telemetry.OutcomeFailed, telemetry.ReasonApply, sources,
+			fmt.Errorf("error writing the object of '%s': %w", policy.Name, err)
 	}
 
 	logger = logger.WithValues("resource", result.Resource, "name", result.Name, "namespace", result.Namespace)
 
 	if result.Existing {
-		return existingObjectMessage, nil
+		logger.V(1).Info("the object exists and 'overwriteExisting' is disabled")
+		return telemetry.OutcomeSkipped, telemetry.ReasonNone, sources, nil
 	}
 
-	logger.Info("generated object written", "created", result.Created)
-	return "", nil
+	logger.Info("the object was generated", "created", result.Created)
+	return telemetry.OutcomeGenerated, telemetry.ReasonNone, sources, nil
+}
+
+// watchedResourceLabel formats the watched resource, expressed as
+// {group}/{version}/{resource}/{namespace}/{name}, as the value of the 'resource' metric label
+func watchedResourceLabel(watched string) string {
+
+	parts := strings.Split(watched, "/")
+	if len(parts) < 3 {
+		return watched
+	}
+
+	return common.ResourceLabel(parts[0], parts[1], parts[2])
+}
+
+// countSources returns how many objects the policy injected from its sources
+func countSources(data *template.InjectedData) int {
+
+	total := 0
+	for _, objects := range data.Sources {
+		total += len(objects)
+	}
+
+	return total
 }

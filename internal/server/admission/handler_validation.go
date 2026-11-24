@@ -68,7 +68,11 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 		"namespace", requestObj.Request.Namespace,
 		"operation", requestObj.Request.Operation)
 
-	logger.Info("object under validation review")
+	logger.V(1).Info("object under validation review")
+
+	// Tracking for the decision line written when the response goes out
+	evaluated := 0
+	rejectedBy := ""
 
 	// Assume that the request is rejected as default
 	reviewResponse := &requestObj
@@ -81,6 +85,12 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 	}
 
 	defer func() {
+		// One line per request, with what the cluster finally decided
+		logger.Info("admission decision",
+			"allowed", reviewResponse.Response.Allowed,
+			"policies", evaluated,
+			"rejectedBy", rejectedBy)
+
 		responseBytes, err := json.Marshal(reviewResponse)
 		if err != nil {
 			logger.Info(fmt.Sprintf("failed converting final response.body into valid JSON: %s", err.Error()))
@@ -120,7 +130,7 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 	for _, caPolicyObj := range caPolicyList {
 
 		// Automatically add some information to the logs
-		policyLogger := logger.WithValues("ClusterValidationPolicy", caPolicyObj.Name)
+		policyLogger := logger.WithValues("policy", caPolicyObj.Name, "kind", telemetry.KindValidate)
 		started := time.Now()
 
 		specificTemplateInjectedObject := *commonTemplateInjectedObject
@@ -131,7 +141,7 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 
 		result := s.validateWith(caPolicyObj, &specificTemplateInjectedObject, prepared)
 		if result.Err != nil {
-			policyLogger.Info("policy could not be applied", "reason", result.Reason, "error", result.Err.Error())
+			policyLogger.Error(result.Err, "the policy could not be applied", "reason", result.Reason)
 		}
 
 		s.dependencies.Metrics.Evaluation(telemetry.KindValidate, caPolicyObj.Name,
@@ -144,6 +154,10 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 			Outcome:   result.Outcome,
 			Reason:    result.Reason,
 		})
+
+		evaluated++
+		policyLogger.V(1).Info("policy evaluated",
+			"outcome", result.Outcome, "reason", result.Reason, "duration", time.Since(started).String())
 
 		if result.Warning != "" {
 			policyLogger.Info(result.Warning)
@@ -165,7 +179,8 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 			continue
 		}
 
-		policyLogger.Info(fmt.Sprintf("object rejected due to unmet conditions: %s", result.Message))
+		rejectedBy = caPolicyObj.Name
+		policyLogger.Info("the object was rejected", "message", result.Message)
 		return
 	}
 

@@ -28,7 +28,7 @@ They are described in the following table:
 | `--enable-special-labels`              | Enable labels that perform sensitive actions                                          |        `false`         |
 | `--exclude-admission-self-namespace`   | Exclude Admitik resources from admission evaluations                                  |        `false`         |
 | `--excluded-admission-namespaces`      | Comma-separated list of namespaces to be excluded from admission evaluations          |          `-`           |
-| `--audit-interval`                     | Interval between compliance scans over the existing objects. `0` disables them         |          `0`           |
+| `--compliance-scan-interval`           | Interval between scans of the objects that already exist. `0` disables them           |          `0`           |
 
 > The flags of the logger are bound by controller-runtime, so `--zap-log-level` and the rest are
 > also available.

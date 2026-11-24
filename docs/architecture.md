@@ -40,7 +40,7 @@ it, so several replicas never fight over the same object.
 
 | Package | Responsibility |
 | --- | --- |
-| `api/v1alpha1` | The CRDs: `ClusterValidationPolicy`, `ClusterMutationPolicy`, `ClusterGenerationPolicy`, `ClusterAuditReport` |
+| `api/v1alpha1` | The CRDs: `ClusterValidationPolicy`, `ClusterMutationPolicy`, `ClusterGenerationPolicy` |
 | `internal/server/admission` | The HTTP server Kubernetes calls. It does not decide, it translates |
 | `internal/evaluator` | Sources and conditions. The only place that knows how a policy is evaluated |
 | `internal/template` | The engine contract and the context handed to the templates |
@@ -55,7 +55,7 @@ it, so several replicas never fight over the same object.
 | `internal/controller/background` | Watches `watchedResources` and hands the events to the processors |
 | `internal/action` | What to do when the conditions pass. Today: `Generate` |
 | `internal/kubeapply` | Writes an unstructured object, resolving its resource and marking the provenance |
-| `internal/audit` | Periodic scan of the existing objects. Writes one `ClusterAuditReport` |
+| `internal/compliance` | Periodic scan of the objects that already exist against the validation policies. Publishes the outcome as metrics |
 | `internal/cascade` | Deletes everything a policy wrote, looking for its labels in every resource type |
 | `internal/common` | Kubernetes events, event type normalization, GVR formatting |
 | `internal/globals` | The application context and the raw Kubernetes clients |

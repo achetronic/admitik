@@ -25,3 +25,14 @@ import (
 func GvrString(gvr schema.GroupVersionResource) string {
 	return strings.Join([]string{gvr.Group, gvr.Version, gvr.Resource}, "/")
 }
+
+// ResourceLabel formats a resource as {group}/{version}/{resource}, leaving the group out when it
+// is empty. It is the value of the 'resource' label in the metrics
+func ResourceLabel(group, version, resource string) string {
+
+	if group == "" {
+		return strings.Join([]string{version, resource}, "/")
+	}
+
+	return strings.Join([]string{group, version, resource}, "/")
+}

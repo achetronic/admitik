@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package audit
+package compliance
 
 import (
 	"context"
@@ -27,7 +27,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 	dynamicFake "k8s.io/client-go/dynamic/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -92,7 +91,8 @@ func validationPolicy(name string, condition v1alpha1.ConditionT) *v1alpha1.Clus
 	}
 }
 
-func newTestScanner(t *testing.T, policies []*v1alpha1.ClusterValidationPolicy, objects ...runtime.Object) (*Scanner, client.Client) {
+func newTestScanner(t *testing.T, options ScannerOptions, policies []*v1alpha1.ClusterValidationPolicy,
+	objects ...runtime.Object) *Scanner {
 	t.Helper()
 
 	scheme := runtime.NewScheme()
@@ -108,7 +108,6 @@ func newTestScanner(t *testing.T, policies []*v1alpha1.ClusterValidationPolicy, 
 	reader := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(objectsToStore...).
-		WithStatusSubresource(&v1alpha1.ClusterAuditReport{}).
 		Build()
 
 	dynamicClient := dynamicFake.NewSimpleDynamicClientWithCustomListKinds(
@@ -119,11 +118,11 @@ func newTestScanner(t *testing.T, policies []*v1alpha1.ClusterValidationPolicy, 
 
 	ctx := context.Background()
 
-	return NewScanner(ScannerOptions{}, ScannerDependencies{
+	return NewScanner(options, ScannerDependencies{
 		Client:    reader,
 		Dynamic:   dynamicClient,
 		Evaluator: evaluator.New(testEngines(t), informer.NewPool(&ctx, nil, 0)),
-	}), reader
+	})
 }
 
 func TestScanCountsCompliantAndNonCompliantObjects(t *testing.T) {
@@ -134,31 +133,31 @@ func TestScanCountsCompliantAndNonCompliantObjects(t *testing.T) {
 		Value:  "true",
 	})
 
-	scanner, _ := newTestScanner(t, []*v1alpha1.ClusterValidationPolicy{policy},
+	scanner := newTestScanner(t, ScannerOptions{}, []*v1alpha1.ClusterValidationPolicy{policy},
 		configMap("with-label", map[string]any{"team": "platform"}),
 		configMap("without-label", nil),
 		configMap("other-labels", map[string]any{"app": "demo"}),
 	)
 
-	report, err := scanner.Scan(context.Background())
+	scan, err := scanner.Scan(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if report.Status.Summary.Scanned != 3 {
-		t.Errorf("got %d scanned, expected 3", report.Status.Summary.Scanned)
+	if scan.Summary.Scanned != 3 {
+		t.Errorf("got %d scanned, expected 3", scan.Summary.Scanned)
 	}
-	if report.Status.Summary.Compliant != 1 {
-		t.Errorf("got %d compliant, expected 1", report.Status.Summary.Compliant)
+	if scan.Summary.Compliant != 1 {
+		t.Errorf("got %d compliant, expected 1", scan.Summary.Compliant)
 	}
-	if report.Status.Summary.NonCompliant != 2 {
-		t.Errorf("got %d non compliant, expected 2", report.Status.Summary.NonCompliant)
+	if scan.Summary.NonCompliant != 2 {
+		t.Errorf("got %d non compliant, expected 2", scan.Summary.NonCompliant)
 	}
-	if len(report.Status.Results) != 1 {
-		t.Fatalf("got %d results, expected 1", len(report.Status.Results))
+	if len(scan.Results) != 1 {
+		t.Fatalf("got %d results, expected 1", len(scan.Results))
 	}
-	if report.Status.Results[0].Resource != "/v1/configmaps" {
-		t.Errorf("got %q as the resource, expected /v1/configmaps", report.Status.Results[0].Resource)
+	if scan.Results[0].Resource != "v1/configmaps" {
+		t.Errorf("got %q as the resource, expected v1/configmaps", scan.Results[0].Resource)
 	}
 }
 
@@ -170,7 +169,7 @@ func TestScanKeepsAFewSamples(t *testing.T) {
 		Value:  "yes",
 	})
 
-	scanner, _ := newTestScanner(t, []*v1alpha1.ClusterValidationPolicy{policy},
+	scanner := newTestScanner(t, ScannerOptions{}, []*v1alpha1.ClusterValidationPolicy{policy},
 		configMap("one", nil),
 		configMap("two", nil),
 		configMap("three", nil),
@@ -179,21 +178,21 @@ func TestScanKeepsAFewSamples(t *testing.T) {
 		configMap("six", nil),
 	)
 
-	report, err := scanner.Scan(context.Background())
+	scan, err := scanner.Scan(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	samples := report.Status.Results[0].Samples
-	if len(samples) != DefaultMaxSamples {
-		t.Fatalf("got %d samples, expected %d", len(samples), DefaultMaxSamples)
+	samples := scan.Results[0].Samples
+	if len(samples) != defaultMaxSamples {
+		t.Fatalf("got %d samples, expected %d", len(samples), defaultMaxSamples)
 	}
 	if !slices.Contains(samples, "default/one") {
 		t.Errorf("got %v, expected the objects as namespace/name", samples)
 	}
 }
 
-func TestScanWritesOneReport(t *testing.T) {
+func TestScanGoesThroughEveryPage(t *testing.T) {
 	policy := validationPolicy("never-passes", v1alpha1.ConditionT{
 		Name:   "always-fails",
 		Engine: "plain",
@@ -201,44 +200,37 @@ func TestScanWritesOneReport(t *testing.T) {
 		Value:  "yes",
 	})
 
-	scanner, reader := newTestScanner(t, []*v1alpha1.ClusterValidationPolicy{policy},
+	scanner := newTestScanner(t, ScannerOptions{PageSize: 2}, []*v1alpha1.ClusterValidationPolicy{policy},
 		configMap("one", nil),
+		configMap("two", nil),
+		configMap("three", nil),
+		configMap("four", nil),
+		configMap("five", nil),
 	)
 
-	ctx := context.Background()
-	if _, err := scanner.Scan(ctx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// A second scan must update the same object, not create another one
-	if _, err := scanner.Scan(ctx); err != nil {
-		t.Fatalf("unexpected error in the second scan: %v", err)
-	}
-
-	reports := &v1alpha1.ClusterAuditReportList{}
-	if err := reader.List(ctx, reports); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(reports.Items) != 1 {
-		t.Fatalf("got %d reports, expected 1", len(reports.Items))
-	}
-	if reports.Items[0].Status.Summary.NonCompliant != 1 {
-		t.Errorf("got %d non compliant, expected 1",
-			reports.Items[0].Status.Summary.NonCompliant)
-	}
-}
-
-func TestScanOfAClusterWithoutPolicies(t *testing.T) {
-	scanner, _ := newTestScanner(t, nil)
-
-	report, err := scanner.Scan(context.Background())
+	scan, err := scanner.Scan(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if report.Status.Summary.Policies != 0 || len(report.Status.Results) != 0 {
-		t.Errorf("got %+v, expected an empty report", report.Status)
+	if scan.Summary.Scanned != 5 {
+		t.Errorf("got %d scanned, expected 5", scan.Summary.Scanned)
+	}
+	if scan.Summary.NonCompliant != 5 {
+		t.Errorf("got %d non compliant, expected 5", scan.Summary.NonCompliant)
+	}
+}
+
+func TestScanOfAClusterWithoutPolicies(t *testing.T) {
+	scanner := newTestScanner(t, ScannerOptions{}, nil)
+
+	scan, err := scanner.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if scan.Summary.Policies != 0 || len(scan.Results) != 0 {
+		t.Errorf("got %+v, expected an empty scan", scan.Summary)
 	}
 }
 
@@ -250,18 +242,18 @@ func TestScanWithoutObjects(t *testing.T) {
 		Value:  "yes",
 	})
 
-	scanner, _ := newTestScanner(t, []*v1alpha1.ClusterValidationPolicy{policy})
+	scanner := newTestScanner(t, ScannerOptions{}, []*v1alpha1.ClusterValidationPolicy{policy})
 
-	report, err := scanner.Scan(context.Background())
+	scan, err := scanner.Scan(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if report.Status.Summary.Scanned != 0 {
-		t.Errorf("got %d scanned, expected 0", report.Status.Summary.Scanned)
+	if scan.Summary.Scanned != 0 {
+		t.Errorf("got %d scanned, expected 0", scan.Summary.Scanned)
 	}
-	if report.Status.Summary.Policies != 1 {
-		t.Errorf("got %d policies, expected 1", report.Status.Summary.Policies)
+	if scan.Summary.Policies != 1 {
+		t.Errorf("got %d policies, expected 1", scan.Summary.Policies)
 	}
 }
 
@@ -274,39 +266,67 @@ func TestScanCountsErrors(t *testing.T) {
 		Value:  "true",
 	})
 
-	scanner, _ := newTestScanner(t, []*v1alpha1.ClusterValidationPolicy{policy},
+	scanner := newTestScanner(t, ScannerOptions{}, []*v1alpha1.ClusterValidationPolicy{policy},
 		configMap("one", nil),
 	)
 
-	report, err := scanner.Scan(context.Background())
+	scan, err := scanner.Scan(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if report.Status.Summary.Errors != 1 {
-		t.Errorf("got %d errors, expected 1", report.Status.Summary.Errors)
+	if scan.Summary.Errors != 1 {
+		t.Errorf("got %d errors, expected 1", scan.Summary.Errors)
 	}
-	if report.Status.Summary.NonCompliant != 0 {
-		t.Errorf("got %d non compliant, expected 0", report.Status.Summary.NonCompliant)
+	if scan.Summary.NonCompliant != 0 {
+		t.Errorf("got %d non compliant, expected 0", scan.Summary.NonCompliant)
 	}
 }
 
-func TestReportName(t *testing.T) {
+func TestScanOfAPolicyThatInterceptsTheSameResourceTwice(t *testing.T) {
 	policy := validationPolicy("never-passes", v1alpha1.ConditionT{
 		Name:   "always-fails",
 		Engine: "plain",
 		Key:    "no",
 		Value:  "yes",
 	})
+	policy.Spec.InterceptedResources = append(policy.Spec.InterceptedResources,
+		policy.Spec.InterceptedResources[0])
 
-	scanner, reader := newTestScanner(t, []*v1alpha1.ClusterValidationPolicy{policy})
+	scanner := newTestScanner(t, ScannerOptions{}, []*v1alpha1.ClusterValidationPolicy{policy},
+		configMap("one", nil),
+	)
 
-	if _, err := scanner.Scan(context.Background()); err != nil {
+	scan, err := scanner.Scan(context.Background())
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	report := &v1alpha1.ClusterAuditReport{}
-	if err := reader.Get(context.Background(), types.NamespacedName{Name: ReportName}, report); err != nil {
-		t.Fatalf("the report was not created with the expected name: %v", err)
+	if len(scan.Results) != 1 {
+		t.Fatalf("got %d results, expected the resource once", len(scan.Results))
+	}
+	if scan.Summary.Scanned != 1 {
+		t.Errorf("got %d scanned, expected 1", scan.Summary.Scanned)
+	}
+}
+
+func TestToTelemetryKeepsWhatTheMetricsNeed(t *testing.T) {
+	converted := ToTelemetry([]Result{{
+		Policy:       "require-limits",
+		Resource:     "v1/pods",
+		Compliant:    8,
+		NonCompliant: 2,
+		Errors:       1,
+		Samples:      []string{"default/one"},
+	}})
+
+	if len(converted) != 1 {
+		t.Fatalf("got %d results, expected 1", len(converted))
+	}
+	if converted[0].Policy != "require-limits" || converted[0].Resource != "v1/pods" {
+		t.Errorf("got %+v, expected the policy and the resource", converted[0])
+	}
+	if converted[0].Compliant != 8 || converted[0].NonCompliant != 2 || converted[0].Errors != 1 {
+		t.Errorf("got %+v, expected the three counts", converted[0])
 	}
 }

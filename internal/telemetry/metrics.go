@@ -30,6 +30,7 @@ type Kind string
 const (
 	KindMutate   Kind = "mutate"
 	KindValidate Kind = "validate"
+	KindGenerate Kind = "generate"
 )
 
 // Outcome is what the policy decided
@@ -42,6 +43,7 @@ const (
 	OutcomeDenied     Outcome = "denied"
 	OutcomePermissive Outcome = "permissive"
 	OutcomeFailed     Outcome = "failed"
+	OutcomeGenerated  Outcome = "generated"
 )
 
 // Reason is why a policy could not be applied. It is a closed set: the error itself only goes to
@@ -54,6 +56,7 @@ const (
 	ReasonConditions Reason = "conditions"
 	ReasonTemplate   Reason = "template"
 	ReasonPatch      Reason = "patch"
+	ReasonApply      Reason = "apply"
 )
 
 // Decision is one policy deciding over one object
@@ -83,6 +86,16 @@ var (
 		Help:    "Source objects injected into the templates of one evaluation.",
 		Buckets: []float64{1, 10, 100, 1000, 5000, 10000, 50000, 200000},
 	}, []string{"kind", "policy"})
+
+	policies = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "admitik_policies",
+		Help: "Number of policies loaded, by kind.",
+	}, []string{"kind"})
+
+	compliance = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "admitik_compliance_objects",
+		Help: "Objects evaluated by the last compliance scan, by policy, resource and result.",
+	}, []string{"policy", "resource", "result"})
 )
 
 // Recorder publishes what the policies do. A nil recorder discards everything, which is what
@@ -93,7 +106,7 @@ type Recorder struct {
 
 func NewRecorder() *Recorder {
 
-	metrics.Registry.MustRegister(decisions, evaluation, injected)
+	metrics.Registry.MustRegister(decisions, evaluation, injected, policies, compliance)
 
 	return &Recorder{enabled: true}
 }
@@ -130,3 +143,46 @@ func (r *Recorder) Evaluation(kind Kind, policy string, duration time.Duration, 
 	evaluation.WithLabelValues(string(kind), policy).Observe(duration.Seconds())
 	injected.WithLabelValues(string(kind), policy).Observe(float64(objects))
 }
+
+// Policies records how many policies of a kind are loaded
+func (r *Recorder) Policies(kind Kind, count int) {
+
+	if r == nil || !r.enabled {
+		return
+	}
+
+	policies.WithLabelValues(string(kind)).Set(float64(count))
+}
+
+// Compliance replaces the numbers of the last compliance scan, so a policy that goes away does
+// not leave its series behind
+func (r *Recorder) Compliance(results []ComplianceResult) {
+
+	if r == nil || !r.enabled {
+		return
+	}
+
+	compliance.Reset()
+
+	for _, result := range results {
+		compliance.WithLabelValues(result.Policy, result.Resource, ComplianceCompliant).Set(float64(result.Compliant))
+		compliance.WithLabelValues(result.Policy, result.Resource, ComplianceNonCompliant).Set(float64(result.NonCompliant))
+		compliance.WithLabelValues(result.Policy, result.Resource, ComplianceErrors).Set(float64(result.Errors))
+	}
+}
+
+// ComplianceResult is one policy over one resource type in a compliance scan
+type ComplianceResult struct {
+	Policy   string
+	Resource string
+
+	Compliant    int
+	NonCompliant int
+	Errors       int
+}
+
+const (
+	ComplianceCompliant    = "compliant"
+	ComplianceNonCompliant = "noncompliant"
+	ComplianceErrors       = "error"
+)

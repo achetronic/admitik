@@ -47,7 +47,7 @@ const (
 	controllerName = "background"
 
 	// consumerName identifies this controller inside the pool, so it only releases its own watches
-	consumerName = "observedresource"
+	consumerName = "background"
 
 	//
 	controllerContextFinishedMessage = "Controller finished by context"

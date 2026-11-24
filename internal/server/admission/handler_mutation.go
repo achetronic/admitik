@@ -73,7 +73,11 @@ func (s *HttpServer) handleMutationRequest(response http.ResponseWriter, request
 		"namespace", requestObj.Request.Namespace,
 		"operation", requestObj.Request.Operation)
 
-	logger.Info("object under mutation review")
+	logger.V(1).Info("object under mutation review")
+
+	// Tracking for the decision line written when the response goes out
+	evaluated := 0
+	patched := 0
 
 	// Assume that the request is allowed by default
 	// Done in purpose as validation webhooks are executed later
@@ -85,6 +89,12 @@ func (s *HttpServer) handleMutationRequest(response http.ResponseWriter, request
 	}
 
 	defer func() {
+		// One line per request, with what the cluster finally decided
+		logger.Info("admission decision",
+			"allowed", reviewResponse.Response.Allowed,
+			"policies", evaluated,
+			"patched", patched)
+
 		responseBytes, err := json.Marshal(reviewResponse)
 		if err != nil {
 			logger.Info(fmt.Sprintf("failed converting final response.body into valid JSON: %s", err.Error()))
@@ -128,7 +138,7 @@ func (s *HttpServer) handleMutationRequest(response http.ResponseWriter, request
 	for _, cmPolicyObj := range cmPolicyList {
 
 		// Automatically add some information to the logs
-		policyLogger := logger.WithValues("ClusterMutationPolicy", cmPolicyObj.Name)
+		policyLogger := logger.WithValues("policy", cmPolicyObj.Name, "kind", telemetry.KindMutate)
 		started := time.Now()
 
 		specificTemplateInjectedObject := *commonTemplateInjectedObject
@@ -139,7 +149,7 @@ func (s *HttpServer) handleMutationRequest(response http.ResponseWriter, request
 
 		result := s.mutateWith(cmPolicyObj, &specificTemplateInjectedObject, patchedObjectBytes, prepared)
 		if result.Err != nil {
-			policyLogger.Info("policy could not be applied", "reason", result.Reason, "error", result.Err.Error())
+			policyLogger.Error(result.Err, "the policy could not be applied", "reason", result.Reason)
 		}
 
 		s.dependencies.Metrics.Evaluation(telemetry.KindMutate, cmPolicyObj.Name,
@@ -153,6 +163,10 @@ func (s *HttpServer) handleMutationRequest(response http.ResponseWriter, request
 			Reason:    result.Reason,
 		})
 
+		evaluated++
+		policyLogger.V(1).Info("policy evaluated",
+			"outcome", result.Outcome, "reason", result.Reason, "duration", time.Since(started).String())
+
 		if result.Warning != "" {
 			policyLogger.Info(result.Warning)
 			addWarning(reviewResponse.Response, result.Warning)
@@ -163,6 +177,7 @@ func (s *HttpServer) handleMutationRequest(response http.ResponseWriter, request
 			continue
 		}
 
+		patched++
 		patchedObjectBytes = result.Patched
 		jsonPatchOperations = append(jsonPatchOperations, result.Operations...)
 	}

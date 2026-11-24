@@ -34,6 +34,21 @@ func NewPolicyStore[T PolicyResourceI]() *PolicyStore[T] {
 	}
 }
 
+// Policies returns how many distinct policies are held, no matter how many collections each one
+// is indexed in
+func (ps *PolicyStore[T]) Policies() int {
+
+	identifiers := map[string]struct{}{}
+
+	for _, collection := range ps.Store.GetCollectionNames() {
+		for _, policy := range ps.Store.GetResources(collection) {
+			identifiers[policy.GetUniqueIdentifier()] = struct{}{}
+		}
+	}
+
+	return len(identifiers)
+}
+
 // GetReferencedSources returns a list of GVR names referenced on 'sources' section across the policies.
 // GVR is expressed as {group}/{version}/{resource}
 func (ps *PolicyStore[T]) GetReferencedSources() []string {

@@ -81,5 +81,5 @@ func countSourceObjects(sources map[int][]map[string]any) int {
 
 // resourceID returns the resource as {group}/{version}/{resource}
 func resourceID(resource metav1.GroupVersionResource) string {
-	return fmt.Sprintf("%s/%s/%s", resource.Group, resource.Version, resource.Resource)
+	return common.ResourceLabel(resource.Group, resource.Version, resource.Resource)
 }

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package audit
+package compliance
 
 import (
 	"context"
@@ -23,6 +23,9 @@ import (
 	//
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	//
+	"github.com/admitikcore/admitik/internal/telemetry"
 )
 
 // Runner scans the cluster every interval. It asks for leader election, so only the elected
@@ -31,8 +34,11 @@ type Runner struct {
 	// Interval between scans
 	Interval time.Duration
 
-	// Scanner builds the report
+	// Scanner evaluates the objects that already exist
 	Scanner *Scanner
+
+	// Metrics publishes what the last scan found
+	Metrics *telemetry.Recorder
 }
 
 var _ manager.LeaderElectionRunnable = Runner{}
@@ -42,11 +48,13 @@ func (r Runner) NeedLeaderElection() bool {
 	return true
 }
 
-// Start runs a scan every interval until the manager stops
+// Start scans once and then every interval until the manager stops
 func (r Runner) Start(ctx context.Context) error {
 
-	logger := log.FromContext(ctx).WithValues("task", "audit")
-	logger.Info("Starting the audit scans", "interval", r.Interval.String())
+	logger := log.FromContext(ctx).WithValues("task", "compliance")
+	logger.Info("Starting the compliance scans", "interval", r.Interval.String())
+
+	r.scan(ctx)
 
 	ticker := time.NewTicker(r.Interval)
 	defer ticker.Stop()
@@ -54,19 +62,31 @@ func (r Runner) Start(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Info("Stopping the audit scans")
+			logger.Info("Stopping the compliance scans")
 			return nil
 		case <-ticker.C:
-			report, err := r.Scanner.Scan(ctx)
-			if err != nil {
-				logger.Error(err, "Failed running the audit scan")
-				continue
-			}
-
-			logger.Info("Audit scan finished",
-				"scanned", report.Status.Summary.Scanned,
-				"nonCompliant", report.Status.Summary.NonCompliant,
-				"duration", report.Status.Duration)
+			r.scan(ctx)
 		}
 	}
+}
+
+// scan evaluates the objects that already exist and publishes the outcome
+func (r Runner) scan(ctx context.Context) {
+
+	logger := log.FromContext(ctx).WithValues("task", "compliance")
+
+	scan, err := r.Scanner.Scan(ctx)
+	if err != nil {
+		logger.Error(err, "Failed running the compliance scan")
+		return
+	}
+
+	r.Metrics.Compliance(ToTelemetry(scan.Results))
+
+	logger.Info("Compliance scan finished",
+		"policies", scan.Summary.Policies,
+		"scanned", scan.Summary.Scanned,
+		"nonCompliant", scan.Summary.NonCompliant,
+		"errors", scan.Summary.Errors,
+		"duration", scan.Duration.String())
 }

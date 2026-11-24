@@ -126,3 +126,22 @@ func TestPolicyStoreKeepsPoliciesPerCollection(t *testing.T) {
 		t.Errorf("got %d policies for secrets, expected 1", got)
 	}
 }
+
+func TestPoliciesCountsEachPolicyOnce(t *testing.T) {
+	store := NewPolicyStore[*testPolicy]()
+
+	// The same policy is indexed under every resource type it watches
+	store.Store.AddOrUpdateResource("v1/configmaps/CREATE", &testPolicy{name: "a"})
+	store.Store.AddOrUpdateResource("v1/secrets/CREATE", &testPolicy{name: "a"})
+	store.Store.AddOrUpdateResource("v1/configmaps/CREATE", &testPolicy{name: "b"})
+
+	if got := store.Policies(); got != 2 {
+		t.Errorf("got %d policies, expected 2", got)
+	}
+}
+
+func TestPoliciesOfAnEmptyStore(t *testing.T) {
+	if got := NewPolicyStore[*testPolicy]().Policies(); got != 0 {
+		t.Errorf("got %d policies, expected 0", got)
+	}
+}
