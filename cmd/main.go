@@ -22,17 +22,12 @@ import (
 	"flag"
 	"net/http"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
-	corev1 "k8s.io/api/core/v1"
-	apimacherrors "k8s.io/apimachinery/pkg/api/errors"
-	apimachv1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -48,7 +43,6 @@ import (
 	"github.com/freepik-company/admitik/internal/action"
 	"github.com/freepik-company/admitik/internal/audit"
 	"github.com/freepik-company/admitik/internal/cascade"
-	"github.com/freepik-company/admitik/internal/certificates"
 	"github.com/freepik-company/admitik/internal/controller"
 	"github.com/freepik-company/admitik/internal/controller/background"
 	"github.com/freepik-company/admitik/internal/controller/clustergenerationpolicy"
@@ -241,110 +235,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	///////////////////////////////////
-	// Get/Generate certificates needed by admission webhooks server
-	// TODO: Extract this entire block to a different function
-	var ca, cert, privKey string
-
-	if (webhooksServerCA != "" || webhooksServerCertificate != "" || webhooksServerPrivateKey != "") &&
-		(webhooksServerCertsSecretName != "") {
-		setupLog.Error(err, "getting certificates from files and from Secret objects are mutually exclusive")
+	// The webhook server needs a certificate: the user can give it as files, as a Secret, or let
+	// Admitik generate one when the Secret does not exist
+	webhooksServerCA, webhooksServerCertificate, webhooksServerPrivateKey, err = setupCertificates(certificateOptions{
+		CAFile:          webhooksServerCA,
+		CertificateFile: webhooksServerCertificate,
+		PrivateKeyFile:  webhooksServerPrivateKey,
+		SecretName:      webhooksServerCertsSecretName,
+		Namespace:       currentNamespace,
+		Autogenerate:    webhooksServerAutogenerateCerts,
+		Hostname:        webhooksClientHostname,
+	})
+	if err != nil {
+		setupLog.Error(err, "unable to set up the certificates of the webhook server")
 		os.Exit(1)
 	}
-
-	if webhooksServerCertsSecretName != "" {
-
-		succeededProcess := false
-		for try := 0; try < 3; try++ {
-
-			secretObj := &corev1.Secret{}
-			secretObj, err = globals.Application.KubeRawCoreClient.CoreV1().Secrets(currentNamespace).
-				Get(globals.Application.Context, webhooksServerCertsSecretName, apimachv1.GetOptions{})
-
-			if err != nil {
-				if !apimacherrors.IsNotFound(err) {
-					setupLog.Error(err, "unable to get secret with certificates")
-					continue
-				}
-
-				if apimacherrors.IsNotFound(err) && !webhooksServerAutogenerateCerts {
-					setupLog.Error(err, "unable to get secret and autogeneration is disabled")
-					continue
-				}
-
-				dnsNames := []string{"localhost", webhooksClientHostname}
-				if strings.HasSuffix(webhooksClientHostname, ".cluster.local") {
-					dnsNames = append(dnsNames, strings.TrimSuffix(webhooksClientHostname, ".cluster.local"))
-				}
-				if strings.HasSuffix(webhooksClientHostname, ".svc") {
-					dnsNames = append(dnsNames, webhooksClientHostname+".cluster.local")
-				}
-				ca, cert, privKey, err = certificates.GenerateCerts(dnsNames)
-
-				if err != nil {
-					setupLog.Error(err, "unable to generate self-signed certificates")
-					continue
-				}
-
-				secretObj.StringData = map[string]string{
-					"ca.crt":  ca,
-					"tls.crt": cert,
-					"tls.key": privKey,
-				}
-
-				secretObj.Name = webhooksServerCertsSecretName
-				_, err = globals.Application.KubeRawCoreClient.CoreV1().Secrets(currentNamespace).
-					Create(globals.Application.Context, secretObj, apimachv1.CreateOptions{})
-				if err != nil {
-					setupLog.Error(err, "unable to create secret with self-signed certificates")
-					continue
-				}
-
-				succeededProcess = true
-				break
-			}
-
-			caBytes, dataFound := secretObj.Data["ca.crt"]
-			if !dataFound {
-				setupLog.Error(err, "unable to get ca.crt from defined secret")
-				os.Exit(1)
-			}
-			ca = string(caBytes)
-
-			certBytes, dataFound := secretObj.Data["tls.crt"]
-			if !dataFound {
-				setupLog.Error(err, "unable to get tls.crt from defined secret")
-				os.Exit(1)
-			}
-			cert = string(certBytes)
-
-			privKeyBytes, dataFound := secretObj.Data["tls.key"]
-			if !dataFound {
-				setupLog.Error(err, "unable to get tls.key from defined secret")
-				os.Exit(1)
-			}
-			privKey = string(privKeyBytes)
-
-			succeededProcess = true
-			break
-		}
-
-		if !succeededProcess {
-			setupLog.Error(err, "unable to get self-signed certificates")
-			os.Exit(1)
-		}
-
-		tempDir := os.TempDir()
-		webhooksServerCA = filepath.Join(tempDir, "ca.crt")
-		os.WriteFile(webhooksServerCA, []byte(ca), 0744)
-
-		webhooksServerCertificate = filepath.Join(tempDir, "tls.crt")
-		os.WriteFile(webhooksServerCertificate, []byte(cert), 0744)
-
-		webhooksServerPrivateKey = filepath.Join(tempDir, "tls.key")
-		os.WriteFile(webhooksServerPrivateKey, []byte(privKey), 0744)
-	}
-	//////////////////////////////////
 
 	// Load the CA bundle if defined
 	caBundleBytes := []byte{}
@@ -492,7 +397,6 @@ func main() {
 	// It watches the resources expressed in the 'watchedResources' section of the policies and hands
 	// their events to the actions that asked for them
 	backgroundController := background.Controller{
-		Client: mgr.GetClient(),
 		Options: background.Options{
 			InformerDurationToResync: sourcesTimeToResyncInformers,
 		},

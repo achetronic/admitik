@@ -28,7 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
@@ -82,9 +81,6 @@ type Controller struct {
 	// Following interface is just needed to register this controller into Controller Runtime manager and let it
 	// launch the controller across all the Admitik replicas or just in the elected leader.
 	manager.LeaderElectionRunnable
-
-	//
-	Client client.Client
 
 	Options      Options
 	Dependencies Dependencies
