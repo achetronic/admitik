@@ -38,13 +38,13 @@ const (
 )
 
 type StrategicMergePatcherDependencies struct {
-	DiscoveryClient *discovery.DiscoveryClient
+	DiscoveryClient discovery.DiscoveryInterface
 }
 type StrategicMergePatcher struct {
 	mu sync.RWMutex
 
 	//
-	discoveryClient *discovery.DiscoveryClient
+	discoveryClient discovery.DiscoveryInterface
 
 	// carried stuff
 	openApiModels       *proto.Models
