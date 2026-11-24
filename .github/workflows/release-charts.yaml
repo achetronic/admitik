@@ -2,6 +2,14 @@ name: Release Charts
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish, for example v1.10.0. The tag has to exist'
+        required: true
+      from_master:
+        description: 'Build from master instead of from the tag. Only to retry a release'
+        type: boolean
+        default: false
 
   # Ref: https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#release
   release:
@@ -16,22 +24,62 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve what to publish
+        id: target
+        env:
+          EVENT: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_FROM_MASTER: ${{ inputs.from_master }}
+        run: |
+          if [ "${EVENT}" = "release" ]; then
+            version="${RELEASE_TAG}"
+            from_master=false
+          else
+            version="${INPUT_VERSION}"
+            from_master="${INPUT_FROM_MASTER}"
+          fi
+
+          if ! printf '%s' "${version}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "'${version}' is not a version like v1.2.3" >&2
+            exit 1
+          fi
+
+          ref="${version}"
+          if [ "${from_master}" = "true" ]; then
+            ref="master"
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "number=${version#v}" >> "$GITHUB_OUTPUT"
+          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
         with:
+          ref: ${{ steps.target.outputs.ref }}
           fetch-depth: 0
+
+      - name: Check the tag exists
+        env:
+          VERSION: ${{ steps.target.outputs.version }}
+        run: |
+          if ! git rev-parse --verify --quiet "refs/tags/${VERSION}" > /dev/null; then
+            echo "The tag ${VERSION} does not exist. Publish the release first: the release is what creates the tag." >&2
+            exit 1
+          fi
 
       - name: Install Helm
         uses: azure/setup-helm@v4
 
-      - name: Check the release tag matches the chart
-        if: github.event_name == 'release'
+      - name: Check the chart says that version
+        env:
+          NUMBER: ${{ steps.target.outputs.number }}
         run: |
-          tag="${GITHUB_REF_NAME#v}"
           version="$(awk '/^version:/ {print $2}' charts/admitik/Chart.yaml)"
           app_version="$(awk '/^appVersion:/ {gsub(/"/, "", $2); print $2}' charts/admitik/Chart.yaml)"
 
-          if [ "${version}" != "${tag}" ] || [ "${app_version}" != "${tag}" ]; then
-            echo "The release is ${tag} but the chart says version ${version} and appVersion ${app_version}" >&2
+          if [ "${version}" != "${NUMBER}" ] || [ "${app_version}" != "${NUMBER}" ]; then
+            echo "The release is ${NUMBER} but the chart says version ${version} and appVersion ${app_version}" >&2
             exit 1
           fi
 
@@ -43,11 +91,16 @@ jobs:
           fi
 
       - name: Package the chart
-        run: helm package charts/admitik --destination dist
+        run: |
+          helm lint charts/admitik
+          helm package charts/admitik --destination dist
 
       - name: Push the chart to the registry
+        env:
+          VERSION: ${{ steps.target.outputs.number }}
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" \
             | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
 
-          helm push dist/admitik-*.tgz "oci://ghcr.io/${{ github.repository }}/charts"
+          # Pushing the same version again replaces the artifact: that is what retrying means
+          helm push "dist/admitik-${VERSION}.tgz" "oci://ghcr.io/${{ github.repository }}/charts"

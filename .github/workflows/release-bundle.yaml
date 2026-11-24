@@ -2,38 +2,68 @@ name: Bundle Kubernetes manifests
 
 on:
   release:
-    types: [created]
+    types: [ published ]
 
   workflow_dispatch:
     inputs:
-      release:
-        description: 'Release tag where to create the binaries (as SemVer vX.X.X)'
+      version:
+        description: 'Version to publish, for example v1.10.0. The tag has to exist'
         required: true
-        default: v0.1.0
+      from_master:
+        description: 'Build from master instead of from the tag. Only to retry a release'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
-  packages: write
 
 jobs:
   build:
     name: Release Kubernetes manifests
     runs-on: ubuntu-latest
     steps:
-      - id: read_tag
-        name: Read release tag name (mostly vx.x.x)
+      - name: Resolve what to publish
+        id: target
+        env:
+          EVENT: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_FROM_MASTER: ${{ inputs.from_master }}
         run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            export TAG="${{ github.ref_name }}"
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            export TAG="${{ inputs.release }}"
+          if [ "${EVENT}" = "release" ]; then
+            version="${RELEASE_TAG}"
+            from_master=false
+          else
+            version="${INPUT_VERSION}"
+            from_master="${INPUT_FROM_MASTER}"
           fi
 
-          echo "release_tag=${TAG}" >> "$GITHUB_OUTPUT"
+          if ! printf '%s' "${version}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "'${version}' is not a version like v1.2.3" >&2
+            exit 1
+          fi
+
+          ref="${version}"
+          if [ "${from_master}" = "true" ]; then
+            ref="master"
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ steps.read_tag.outputs.release_tag }}
+          ref: ${{ steps.target.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Check the tag exists
+        env:
+          VERSION: ${{ steps.target.outputs.version }}
+        run: |
+          if ! git rev-parse --verify --quiet "refs/tags/${VERSION}" > /dev/null; then
+            echo "The tag ${VERSION} does not exist. Publish the release first: the release is what creates the tag." >&2
+            exit 1
+          fi
 
       - name: Read Go version from go.mod
         id: read_go_version
@@ -49,19 +79,13 @@ jobs:
       - id: build
         name: Build manifests bundle
         env:
-          RELEASE_TAG: ${{ steps.read_tag.outputs.release_tag }}
+          VERSION: ${{ steps.target.outputs.version }}
         run: |
-          export IMG="ghcr.io/$GITHUB_REPOSITORY:$RELEASE_TAG"
+          export IMG="ghcr.io/$GITHUB_REPOSITORY:${VERSION}"
           make build-installer
 
-      - name: Attach bundle to the release
-        uses: softprops/action-gh-release@v2
+      - name: Attach the bundle to the release
         env:
-          RELEASE_TAG: ${{ steps.read_tag.outputs.release_tag }}
-        with:
-          tag_name: ${{ steps.read_tag.outputs.release_tag }}
-          body: ""
-          files: |
-            dist/install.yaml
-          append_body: true
-          generate_release_notes: false
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.target.outputs.version }}
+        run: gh release upload "${VERSION}" dist/install.yaml --clobber
