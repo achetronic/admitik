@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 	"time"
@@ -64,6 +65,10 @@ import (
 	"github.com/admitikcore/admitik/internal/template/starlark"
 	// +kubebuilder:scaffold:imports
 )
+
+// defaultWebhookServiceName is the name of the Service that fronts the webhooks server, as the
+// manifests of config/ produce it
+const defaultWebhookServiceName = "admitik-webhooks"
 
 var (
 	scheme   = runtime.NewScheme()
@@ -130,8 +135,9 @@ func main() {
 	flag.DurationVar(&sourcesTimeToResyncInformers, "sources-time-to-resync-informers", 60*time.Second,
 		"Interval to resynchronize all resources in the informers")
 
-	flag.StringVar(&webhooksClientHostname, "webhook-client-hostname", "webhooks.admitik.svc",
-		"The hostname used by Kubernetes when calling the webhooks server")
+	flag.StringVar(&webhooksClientHostname, "webhook-client-hostname", "",
+		"The hostname Kubernetes uses to reach the webhooks server. Empty means "+
+			defaultWebhookServiceName+".<namespace>.svc")
 	flag.IntVar(&webhooksClientPort, "webhook-client-port", 10250,
 		"The port used by Kubernetes when calling the webhooks server")
 	flag.IntVar(&webhooksClientTimeout, "webhook-client-timeout", 10,
@@ -224,6 +230,13 @@ func main() {
 	if err != nil {
 		setupLog.Error(err, "unable to get current namespace")
 		os.Exit(1)
+	}
+
+	// The webhooks server is reached through a Service that lives next to this replica, so the
+	// hostname is derived from the namespace we are running in. The chart passes its own, because
+	// the name of the Service depends on the release
+	if webhooksClientHostname == "" {
+		webhooksClientHostname = fmt.Sprintf("%s.%s.svc", defaultWebhookServiceName, currentNamespace)
 	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled

@@ -63,6 +63,10 @@ spec:
         args:
           - --leader-elect
           - --health-probe-bind-address=:8081
+          # The webhooks server has to speak TLS, and the bundle has nothing to provide a
+          # certificate, so it generates one and keeps it in this Secret
+          - --webhook-server-autogenerate-certs=true
+          - --webhook-server-certs-secret-name=webhook-server-certs
         image: controller:latest
         name: manager
         securityContext:

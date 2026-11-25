@@ -47,6 +47,10 @@ help: ## Display this help.
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
+.PHONY: verify-bundle
+verify-bundle: ## Install the release bundle in the current cluster and check it works.
+	./hack/test-bundle.sh
+
 .PHONY: chart-crds
 chart-crds: ## Copy the generated CRDs into the chart.
 	cp config/crd/bases/*.yaml charts/admitik/crds/

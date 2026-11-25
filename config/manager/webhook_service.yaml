@@ -1,0 +1,20 @@
+# The webhooks server is reached through this Service. The name and the namespace come out of the
+# transformers of config/default, so the hostname the controller derives from its own namespace
+# matches what Kubernetes has to call
+apiVersion: v1
+kind: Service
+metadata:
+  name: webhooks
+  namespace: system
+  labels:
+    control-plane: controller-manager
+    app.kubernetes.io/name: admitik
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  selector:
+    control-plane: controller-manager
+  ports:
+    - name: webhooks
+      port: 10250
+      targetPort: 10250
+      protocol: TCP

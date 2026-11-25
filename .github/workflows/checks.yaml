@@ -36,6 +36,31 @@ jobs:
       - name: Run the tests with the race detector
         run: make test
 
+  bundle:
+    name: Installer bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Create a kind cluster
+        uses: helm/kind-action@v1.10.0
+        with:
+          cluster_name: admitik
+
+      - name: Build the image and load it into the cluster
+        run: |
+          IMG=admitik:checks make docker-build
+          kind load docker-image admitik:checks --name admitik
+
+      - name: Install the bundle and check it works
+        env:
+          IMG: admitik:checks
+        run: make verify-bundle
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
