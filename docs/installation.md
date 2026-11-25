@@ -26,7 +26,7 @@ people who do not use Helm:
 kubectl apply -f https://github.com/admitikcore/admitik/releases/download/v1.11.0/install.yaml
 ```
 
-It installs into `admitik-system` and generates its own certificate.
+It installs into `admitik` and generates its own certificate.
 
 ## Removing it
 

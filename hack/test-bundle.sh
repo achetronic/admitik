@@ -13,7 +13,7 @@ cd "$(dirname "$0")/.."
 # into it. 'controller:latest', the default of the Makefile, is not pullable
 IMG="${IMG:?set IMG to an image the cluster can pull}"
 
-NAMESPACE="${NAMESPACE:-admitik-system}"
+NAMESPACE="${NAMESPACE:-admitik}"
 SERVICE="${SERVICE:-admitik-webhooks}"
 POLICY_NAMESPACE="${POLICY_NAMESPACE:-bundle-scope}"
 VALIDATING_CONFIGURATION="admitik-cluster-validation-policy"

@@ -5,13 +5,13 @@ metadata:
     control-plane: controller-manager
     app.kubernetes.io/name: admitik
     app.kubernetes.io/managed-by: kustomize
-  name: system
+  name: admitik
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: controller-manager
-  namespace: system
+  namespace: admitik
   labels:
     control-plane: controller-manager
     app.kubernetes.io/name: admitik
