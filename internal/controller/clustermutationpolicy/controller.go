@@ -108,6 +108,10 @@ func (r *ClusterMutationPolicyReconciler) Reconcile(ctx context.Context, req ctr
 			// The rules of the webhook are built from the policies that exist, so the last
 			// deletion has to rewrite them now that the object is really gone. Without this,
 			// the rules of the deleted policy would stay in the configuration forever
+			// A policy deleted before this controller added its finalizer never goes through
+			// the removal path, so the registry would keep an object that no longer exists
+			controller.RemoveFromRegistry(r.Dependencies.ClusterMutationPolicyRegistry.Store, req.Name)
+
 			if r.IsLeader() {
 				if syncErr := r.SyncWebhookConfiguration(ctx); syncErr != nil {
 					logger.Info(fmt.Sprintf(controller.ResourceReconcileError, controller.ClusterMutationPolicyResourceType, req.Name, syncErr.Error()))

@@ -27,6 +27,9 @@ import (
 	//
 	admissionregv1 "k8s.io/api/admissionregistration/v1"
 	"k8s.io/apimachinery/pkg/types"
+
+	//
+	"github.com/admitikcore/admitik/internal/store/simple"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -140,4 +143,19 @@ func UpdateWithRetry(
 
 		return client.Update(ctx, object)
 	})
+}
+
+// RemoveFromRegistry drops every entry of the registry with that name, whatever collection it is
+// indexed in. Without it, a policy deleted before the controller added its finalizer would stay in
+// memory and keep being applied
+func RemoveFromRegistry[T simple.StoreResourceI](store *simple.Store[T], name string) {
+
+	for _, collection := range store.GetCollectionNames() {
+		for _, resource := range store.GetResources(collection) {
+			if resource.GetUniqueIdentifier() == name {
+				store.RemoveResource(collection, resource)
+				break
+			}
+		}
+	}
 }
