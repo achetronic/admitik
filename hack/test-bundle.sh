@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # Installs the bundle that ships with the release and checks that it works: the Service that fronts
-# the webhooks, a policy that is enforced, and nothing left behind. It runs against the cluster of
-# the current kubeconfig, which has to be a throwaway one.
+# the webhooks, a policy that is enforced, and that the cluster still accepts objects once the bundle
+# is gone. It runs against the cluster of the current kubeconfig, which has to be a throwaway one.
 #
 # Ref: https://admitik.dev/docs/installation/
 
