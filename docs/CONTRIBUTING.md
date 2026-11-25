@@ -33,11 +33,11 @@ make install run
 > It goes from Kube Apiserver to your local webhooks server. It's done this way to be able to test the webhooks server
 > using local development tools such as **Kind**
 
-If you would like to test the operator against some resources, our examples can be applied to see the result in
-your Kind cluster
+If you would like to test the operator against some resources, the [use cases](https://admitik.dev/use-cases/)
+carry ready-to-apply policies. Copy the manifest of one of them and apply it to your Kind cluster:
 
 ```sh
-kubectl apply -k ./docs/samples/
+kubectl apply -f policy.yaml
 ```
 
 > Remember that your `kubectl` is pointing to your Kind cluster. However, you should always review the context your
@@ -63,7 +63,7 @@ make manifests generate chart-crds
 must produce no changes: `make verify-chart` fails when they do, and the checks of the pull
 request run it.
 
-If you touch a log line, the fields are a contract: see [logs.md](./logs.md).
+If you touch a log line, the fields are a contract: see the [logs reference](https://admitik.dev/docs/observability/logs/).
 
 ## How releases are created
 

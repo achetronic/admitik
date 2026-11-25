@@ -29,7 +29,7 @@ controller:
   cleanupWebhooksOnUninstall: true
 
   # Extra args to pass to the controller.
-  # Ref: https://github.com/admitikcore/admitik/blob/master/docs/configuration.md
+  # Ref: https://admitik.dev/docs/configuration/
   # Example:
   # - --webhook-server-ca=/etc/webhook-server/certs/ca.crt
   # - --webhook-server-certificate=/etc/webhook-server/certs/tls.crt

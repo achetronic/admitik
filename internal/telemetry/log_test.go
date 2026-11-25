@@ -164,8 +164,8 @@ func TestLogDecisionAppendsTheExtraFields(t *testing.T) {
 }
 
 // TestTheContractOfADecisionLine pins the fields every decision line carries. Changing them breaks
-// the queries of whoever reads the logs, so the test must be updated on purpose, together with
-// docs/logs.md
+// the queries of whoever reads the logs, so the test must be updated on purpose, together with the
+// logs reference at https://admitik.dev/docs/observability/logs/
 func TestTheContractOfADecisionLine(t *testing.T) {
 	line := mutationLine()
 
