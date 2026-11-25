@@ -181,10 +181,8 @@ spec:
                 - resource
                 x-kubernetes-list-type: map
             required:
-            - conditions
             - interceptedResources
             - message
-            - sources
             type: object
           status:
             description: ClusterValidationPolicyStatus defines the observed state

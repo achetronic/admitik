@@ -71,12 +71,14 @@ type ClusterGenerationPolicySpec struct {
 	// +listMapKey=group
 	// +listMapKey=version
 	// +listMapKey=resource
-	Sources []SourceGroupT `json:"sources"`
+	// +optional
+	Sources []SourceGroupT `json:"sources,omitempty"`
 
 	// Conditions represents a list of conditions that must be passed to meet the policy
 	// +listType=map
 	// +listMapKey=name
-	Conditions []ConditionT `json:"conditions"`
+	// +optional
+	Conditions []ConditionT `json:"conditions,omitempty"`
 
 	Object ObjectT `json:"object"`
 }

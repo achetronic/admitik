@@ -186,10 +186,8 @@ spec:
                 - resource
                 x-kubernetes-list-type: map
             required:
-            - conditions
             - interceptedResources
             - patch
-            - sources
             type: object
           status:
             description: ClusterMutationPolicyStatus defines the observed state of

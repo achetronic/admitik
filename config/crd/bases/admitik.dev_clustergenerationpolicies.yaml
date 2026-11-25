@@ -201,9 +201,7 @@ spec:
                 - namespace
                 x-kubernetes-list-type: map
             required:
-            - conditions
             - object
-            - sources
             - watchedResources
             type: object
           status:
