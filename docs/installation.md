@@ -9,7 +9,7 @@ object.
 The chart is published as an OCI artifact in the packages of this repository:
 
 ```console
-helm install admitik oci://ghcr.io/admitikcore/admitik/charts/admitik --version 1.11.0 --namespace admitik --create-namespace
+helm install admitik oci://ghcr.io/admitikcore/admitik/charts/admitik --version 1.11.1 --namespace admitik --create-namespace
 ```
 
 It creates a Service in front of the webhooks server, generates the certificate the API server needs
@@ -23,7 +23,7 @@ Every release also ships an `install.yaml` with the CRDs, the RBAC and the Deplo
 people who do not use Helm:
 
 ```console
-kubectl apply -f https://github.com/admitikcore/admitik/releases/download/v1.11.0/install.yaml
+kubectl apply -f https://github.com/admitikcore/admitik/releases/download/v1.11.1/install.yaml
 ```
 
 It installs into `admitik` and generates its own certificate.
@@ -64,5 +64,5 @@ kubeconfig, checks that the webhooks are reachable and that a policy is enforced
 needs an image the cluster can pull:
 
 ```console
-IMG=ghcr.io/admitikcore/admitik:v1.11.0 make verify-bundle
+IMG=ghcr.io/admitikcore/admitik:v1.11.1 make verify-bundle
 ```
