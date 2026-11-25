@@ -1,8 +1,9 @@
 Admitik is running in the namespace {{ .Release.Namespace }}.
 
-Policies are cluster scoped. Create one and the webhook configurations appear by themselves:
+Policies are cluster scoped. The webhook configurations appear by themselves as soon as one exists.
+Examples to copy:
 
-  kubectl apply -f https://github.com/admitikcore/admitik/tree/master/docs/samples
+  https://admitik.dev/use-cases/
 
 The webhook configurations are created by the controller, so Helm does not manage them.
 {{- if .Values.controller.cleanupWebhooksOnUninstall }}

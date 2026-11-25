@@ -19,16 +19,15 @@
 > the same team is continuing the project here as a spin-off. Same engine, same ideas, and the
 > intention to keep improving it in the open for everyone.
 
-Admitik is a cloud native policy engine for Kubernetes that lets you define policies 
-to **validate**, **mutate**, **generate**, **clone**, or **clean** resources. 
+Admitik is a cloud native policy engine for Kubernetes that lets you define policies to
+**validate**, **mutate**, **generate**, **clone**, or **clean** resources.
 
-It uses template engines (like CEL or Starlark) to apply logic, patch resources, or generate new ones 
-— all directly inside your cluster.
+It uses template engines (CEL, Starlark, Go templates) to apply logic, patch resources, or generate
+new ones, all directly inside your cluster.
 
 No new languages to learn. No sidecars. Just Kubernetes-native power. 💪
 
-
-## ✨ What Can Admitik Do?
+## ✨ What can Admitik do?
 
 #### ✅ **Validation**
 Enforce admission rules to keep your cluster secure, compliant, and predictable.
@@ -56,47 +55,30 @@ Create complementary resources in response to cluster activity.
 > [!IMPORTANT]
 > We are working on this feature! 🛠️
 
-<!---
-Replicate trusted configurations across scopes to ensure alignment and reduce duplication.
-
-- Distribute shared policies or settings across teams or namespaces
-- Keep environments in sync by replicating structural patterns
-- Copy access or config resources securely between isolated areas
--->
-
 #### 🧹 **Cleanup**
 
 > [!IMPORTANT]
 > We are working on this feature! 🛠️
 
-<!---
-Continuously remove resources that are no longer relevant or safe to keep.
-
-- Delete completed workloads to avoid clutter and resource waste
-- Clean up temporary or short-lived artifacts after use
-- Enforce retention policies for unused or expired infrastructure
--->
-
+Today the only thing that goes away on its own is what a generation policy wrote, when it is
+removed with `deletionPolicy: Delete`.
 
 ## 🧰 Template Engines
 
-Admitik uses templating to evaluate conditions, build messages, craft patches, or define generated objects.
+Admitik uses templating to evaluate conditions, build messages, craft patches, or define generated
+objects. Each template can pick its engine, and the engines can be combined in the same policy.
 
-Supported engines:
+| Engine | What it is |
+|---------------|--------------------------------------------------------------------------|
+| `cel`         | Common Expression Language. The default. Read-only, for expressions. |
+| `gotmpl`      | Go templates, with [Sprig functions](https://masterminds.github.io/sprig/). |
+| `starlark`    | A Python-like scripting language. Loops, state, and `vars` you can write. |
+| `plain`       | No templating: you write the value. |
+| `plain+cel`   | A plain string with inline `{{ }}` CEL expressions. |
 
-- **Go Templates** (with [Sprig functions](https://masterminds.github.io/sprig/))
-- **CEL** (Common Expression Language)
-- **Starlark** (a Python-like scripting language)
-- **Plain** (you write it, your rules)
-- **Plain+CEL** (light templating with inline CEL expressions)
-
-Choose the one that fits your needs — or combine them in the same policy!
-
-<!---
 ### 🧠 Evaluation Context
--->
 
-Inside any template, you can access these powerful variables:
+Inside any template, you can access these variables:
 
 | Key         | Description                                                                                         |
 |-------------|-----------------------------------------------------------------------------------------------------|
@@ -109,66 +91,56 @@ Inside any template, you can access these powerful variables:
 These variables let you write dynamic, context-aware policies using real cluster data. 🔍
 
 > [!TIP]
-> Remember that each engine has its own capabilities, so all the variables are available everywhere, 
-> but not all engines can do everything. For example, CEL is for simple expressions, so it can read `vars` but can not modify them
-
+> All the variables are available to every engine, but not all engines can do everything with them.
+> CEL is for expressions, so it can read `vars` but cannot modify them. Starlark can.
 
 ## 📂 Policy Kinds
 
-| Kind                      | What it does                                          |
-|---------------------------|-------------------------------------------------------|
-| `ClusterValidationPolicy` | Validates intercepted resources                       |
-| `ClusterMutationPolicy`   | Modifies intercepted resources                        |
-| `ClusterGenerationPolicy` | Generates new resources (or clone existing) on events |
+| Kind                      | What it does                                         |
+|---------------------------|------------------------------------------------------|
+| `ClusterValidationPolicy` | Validates intercepted resources                      |
+| `ClusterMutationPolicy`   | Modifies intercepted resources                       |
+| `ClusterGenerationPolicy` | Generates new resources (or clones existing) on events |
 
-<!---
-| `ClusterCleanupPolicy`    | Deletes resources under custom rules                  |
--->
+`ClusterCleanupPolicy` is not here yet. Until it lands, deleting a generation policy is how you
+remove what it wrote, with `deletionPolicy: Delete`.
 
-## 🧪 Examples
+## 📚 Documentation
 
-We’ve prepared real-world examples so you can get started quickly:
+The full documentation lives at **[admitik.dev](https://admitik.dev)**:
 
-<!---
-HIDDEN UNTIL DOC PAGES ARE FULLY CRAFTED
-👉 [admitik.dev/docs/examples](https://admitik.dev/docs/examples)
--->
-
-[Examples](./docs/samples)
-
+| Page | What you find |
+|---|---|
+| [Installation](https://admitik.dev/docs/installation/) | Helm chart, bundle, and how to remove them. |
+| [Concepts](https://admitik.dev/docs/concepts/) | What a policy is made of: sources, conditions, engines, triggers. |
+| [Policies](https://admitik.dev/docs/policies/) | Validation, mutation, generation, clone and cleanup. |
+| [Configuration](https://admitik.dev/docs/configuration/) | Flags and their defaults. |
+| [Use cases](https://admitik.dev/use-cases/) | Working policies with their explanation, to copy and adapt. |
+| [Observability](https://admitik.dev/docs/observability/) | Metrics and the log contract. |
 
 ## 📦 Installation
 
-We will cover all the installation methods in documentation soon, in the meanwhile, instructions here!
-
 ```console
-helm install admitik oci://ghcr.io/admitikcore/admitik/charts/admitik --version 1.10.0
+helm install admitik oci://ghcr.io/admitikcore/admitik/charts/admitik \
+  --version 1.11.1 --namespace admitik --create-namespace
 ```
 
-<!---
-HIDDEN UNTIL DOC PAGES ARE FULLY CRAFTED
-
-## 🌐 Documentation
-
-Advanced usage guides, examples, and reference docs coming soon:
-
-👉 [admitik.dev/docs](https://admitik.dev/docs)
--->
+There is also a plain `install.yaml` attached to every release, for the people who do not use Helm.
+The [installation page](https://admitik.dev/docs/installation/) covers both, the certificate and the
+uninstall.
 
 ## 🤝 Contributing
 
-All contributions are welcome! Whether you're reporting bugs, suggesting features, or submitting code — thank you! Here’s how to get involved:
+All contributions are welcome! Whether you're reporting bugs, suggesting features, or submitting
+code, thank you! Here’s how to get involved:
 
 ▸ [Open an issue](https://github.com/admitikcore/admitik/issues/new) to report bugs or request features
 
 ▸ [Submit a pull request](https://github.com/admitikcore/admitik/pulls) to contribute improvements
 
-<!---
-▸ [Ask a question or start a discussion](https://github.com/admitikcore/admitik/discussions)
--->
-
 ▸ [Check open milestones](https://github.com/admitikcore/admitik/milestones) to see what’s coming
 
+Development setup and the release process are in [CONTRIBUTING.md](./docs/CONTRIBUTING.md).
 
 ## 📄 License
 

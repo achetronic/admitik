@@ -96,7 +96,7 @@ build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/main.go
 
 .PHONY: run
-run: manifests generate fmt vet ## Run operator locally for development (requires kind cluster).
+run: manifests generate fmt vet caddy ## Run operator locally for development (requires kind cluster).
 	@echo "Checking if current context is a local kind cluster..."
 	@CURRENT_CONTEXT=$$(kubectl config current-context); \
 	if ! echo "$$CURRENT_CONTEXT" | grep -q "^kind-"; then \
