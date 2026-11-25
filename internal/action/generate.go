@@ -154,6 +154,10 @@ func (g *Generate) generate(
 			fmt.Errorf("error decoding the rendered object of '%s': %w", policy.Name, err)
 	}
 
+	// From here the line is about the object that was rendered, even when writing it fails: the
+	// trigger goes in its own field
+	line.Object = common.ObjectRefOfObject(definition)
+
 	result, err := g.dependencies.Writer.Apply(ctx, kubeapply.Options{
 		PolicyName: policy.Name,
 		PolicyKind: GenerationPolicyKind,
@@ -163,9 +167,6 @@ func (g *Generate) generate(
 		return telemetry.OutcomeFailed, telemetry.ReasonApply, sources,
 			fmt.Errorf("error writing the object of '%s': %w", policy.Name, err)
 	}
-
-	// From here the line is about the object that was written, not the one that triggered it
-	line.Object = common.ObjectRefOfObject(definition)
 
 	if result.Existing {
 		line.Message = "the object exists and 'overwriteExisting' is disabled"

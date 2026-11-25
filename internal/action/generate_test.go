@@ -260,3 +260,30 @@ func TestTriggerIsOnlyNamedWhenItIsAnotherObject(t *testing.T) {
 		t.Errorf("got %v, expected no trigger", fields)
 	}
 }
+
+func TestAFailedWriteNamesTheObjectItTriedToWrite(t *testing.T) {
+	// The writer cannot resolve a kind that does not exist, so the policy gets as far as writing
+	policy := generationPolicy(`
+apiVersion: v1
+kind: DoesNotExist
+metadata:
+  name: ghost
+  namespace: default
+`)
+
+	action := newTestGenerate(t, policy)
+
+	line := &telemetry.DecisionLine{}
+	outcome, reason, _, err := action.generate(context.Background(), policy, watch.Added,
+		[]map[string]any{watchedObject()}, line)
+
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if outcome != telemetry.OutcomeFailed || reason != telemetry.ReasonApply {
+		t.Errorf("got %q/%q, expected failed/apply", outcome, reason)
+	}
+	if line.Object.Kind != "DoesNotExist" || line.Object.Name != "ghost" {
+		t.Errorf("got %+v, expected the object it tried to write", line.Object)
+	}
+}
