@@ -109,6 +109,10 @@ func main() {
 	var excludeAdmissionSelfNamespace bool
 	var excludedAdmissionNamespaces string
 
+	var composeMutations bool
+
+	var cleanupWebhooks bool
+
 	var complianceScanInterval time.Duration
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metric endpoint binds to. "+
@@ -162,6 +166,13 @@ func main() {
 	flag.StringVar(&excludedAdmissionNamespaces, "excluded-admission-namespaces", "",
 		"Comma-separated list of namespaces to be excluded from admission evaluations. Commonly used for 'kube-system'")
 
+	flag.BoolVar(&composeMutations, "compose-mutations", true,
+		"Make every mutation policy see the object as the previous ones left it. "+
+			"Disabled, every policy evaluates the object as it arrived")
+
+	flag.BoolVar(&cleanupWebhooks, "cleanup-webhooks", false,
+		"Delete the webhook configurations and exit. Used by the chart to clean up after an uninstall")
+
 	flag.DurationVar(&complianceScanInterval, "compliance-scan-interval", 0,
 		"Interval between compliance scans over the objects that already exist. Zero disables them")
 
@@ -177,6 +188,19 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	// The chart runs the same image after an uninstall to take the webhook configurations away.
+	// Without it, they stay pointing to a Service that no longer exists and, with a failure
+	// policy of Fail, the cluster rejects every object of the intercepted types
+	if cleanupWebhooks {
+		if err := cleanupWebhookConfigurations(globals.Application.Context); err != nil {
+			setupLog.Error(err, "failed removing the webhook configurations")
+			os.Exit(1)
+		}
+
+		setupLog.Info("the webhook configurations are gone")
+		return
+	}
 
 	// Define the context separated as it will be used by our custom controller too.
 	// This will synchronize goroutine death when the main controller is killed
@@ -467,6 +491,7 @@ func main() {
 			Evaluator:                       policyEvaluator,
 			Engines:                         engines,
 			Metrics:                         telemetryRecorder,
+			ComposeMutations:                composeMutations,
 		})
 	if err = mgr.Add(admissionServer); err != nil {
 		setupLog.Error(err, "failed adding admission server controller to manager")

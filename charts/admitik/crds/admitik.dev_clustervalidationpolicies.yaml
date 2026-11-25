@@ -76,6 +76,17 @@ spec:
                   properties:
                     group:
                       type: string
+                    name:
+                      default: ""
+                      description: Name limits the policy to the objects with this
+                        name. Empty means every name
+                      type: string
+                    namespace:
+                      default: ""
+                      description: |-
+                        Namespace limits the policy to the objects in this namespace. Empty means every
+                        namespace, and it is the only valid value for cluster scoped resources
+                      type: string
                     operations:
                       description: Conditions represents a list of conditions that
                         must be passed to meet the policy
@@ -99,6 +110,8 @@ spec:
                 - group
                 - version
                 - resource
+                - name
+                - namespace
                 x-kubernetes-list-type: map
               message:
                 properties:

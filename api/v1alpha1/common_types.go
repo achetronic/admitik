@@ -74,6 +74,17 @@ type AdmissionResourceGroupT struct {
 	// Conditions represents a list of conditions that must be passed to meet the policy
 	// +listType=set
 	Operations []admissionV1.OperationType `json:"operations"`
+
+	// Name limits the policy to the objects with this name. Empty means every name
+	// +optional
+	// +kubebuilder:default=""
+	Name string `json:"name,omitempty"`
+
+	// Namespace limits the policy to the objects in this namespace. Empty means every
+	// namespace, and it is the only valid value for cluster scoped resources
+	// +optional
+	// +kubebuilder:default=""
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // ConditionT represents a condition that must be passed to meet the policy

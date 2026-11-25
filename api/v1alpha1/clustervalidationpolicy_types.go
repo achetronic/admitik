@@ -39,6 +39,8 @@ type ClusterValidationPolicySpec struct {
 	// +listMapKey=group
 	// +listMapKey=version
 	// +listMapKey=resource
+	// +listMapKey=name
+	// +listMapKey=namespace
 	InterceptedResources []AdmissionResourceGroupT `json:"interceptedResources"`
 
 	// Sources represents a list of extra resource-groups to watch and inject in templates

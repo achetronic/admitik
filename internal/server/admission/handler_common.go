@@ -25,6 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	//
+	"github.com/admitikcore/admitik/api/v1alpha1"
 	"github.com/admitikcore/admitik/internal/common"
 	"github.com/admitikcore/admitik/internal/template"
 )
@@ -82,4 +83,34 @@ func countSourceObjects(sources map[int][]map[string]any) int {
 // resourceID returns the resource as {group}/{version}/{resource}
 func resourceID(resource metav1.GroupVersionResource) string {
 	return common.ResourceLabel(resource.Group, resource.Version, resource.Resource)
+}
+
+// matchesScopes tells whether one of the intercepted resources of a policy covers the object.
+// A scope with an empty namespace or name covers every one of them
+func matchesScopes(
+	scopes []v1alpha1.AdmissionResourceGroupT,
+	resource metav1.GroupVersionResource,
+	namespace, name string,
+) bool {
+
+	for _, scope := range scopes {
+
+		if scope.Group != resource.Group ||
+			scope.Version != resource.Version ||
+			scope.Resource != resource.Resource {
+			continue
+		}
+
+		if scope.Namespace != "" && scope.Namespace != namespace {
+			continue
+		}
+
+		if scope.Name != "" && scope.Name != name {
+			continue
+		}
+
+		return true
+	}
+
+	return false
 }

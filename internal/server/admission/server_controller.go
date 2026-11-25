@@ -59,6 +59,10 @@ type AdmissionServerDependencies struct {
 
 	// Metrics records what the policies decide. It can be nil
 	Metrics *telemetry.Recorder
+
+	// ComposeMutations makes every mutation policy see the object as the previous ones left it.
+	// When disabled, all of them evaluate the object as it arrived
+	ComposeMutations bool
 }
 
 // AdmissionServerOptions represents available options that can be passed

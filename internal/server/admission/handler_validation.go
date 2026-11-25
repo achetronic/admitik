@@ -111,6 +111,10 @@ func (s *HttpServer) handleValidationRequest(response http.ResponseWriter, reque
 	// At this point, some extra params will be added to the object that will be injected in template
 	caPolicyList := s.dependencies.ClusterValidationPolicyRegistry.Store.GetResources(resourcePattern)
 	for _, caPolicyObj := range caPolicyList {
+		if !matchesScopes(caPolicyObj.Spec.InterceptedResources, requestObj.Request.Resource,
+			requestObj.Request.Namespace, requestObj.Request.Name) {
+			continue
+		}
 
 		// Automatically add some information to the logs
 		started := time.Now()
@@ -233,6 +237,13 @@ func (s *HttpServer) validateWith(
 	if prepared.Reason == telemetry.ReasonConditions {
 		result.Outcome = telemetry.OutcomeFailed
 		result.Warning = fmt.Sprintf("admitik: policy '%s' could not evaluate its conditions", policy.Name)
+
+		// Saying what the policy would have said about a compliant object hides the real
+		// problem: the policy is broken, and that is what the user has to read
+		result.Message = fmt.Sprintf(
+			"admitik: policy '%s' could not be evaluated, so the object was rejected", policy.Name)
+
+		return result
 	}
 
 	message, err := s.dependencies.Engines.Evaluate(policy.Spec.Message.Engine, policy.Spec.Message.Template, data)

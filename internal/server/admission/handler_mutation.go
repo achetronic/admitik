@@ -119,6 +119,10 @@ func (s *HttpServer) handleMutationRequest(response http.ResponseWriter, request
 
 	cmPolicyList := s.dependencies.ClusterMutationPolicyRegistry.Store.GetResources(resourcePattern)
 	for _, cmPolicyObj := range cmPolicyList {
+		if !matchesScopes(cmPolicyObj.Spec.InterceptedResources, requestObj.Request.Resource,
+			requestObj.Request.Namespace, requestObj.Request.Name) {
+			continue
+		}
 
 		// Automatically add some information to the logs
 		started := time.Now()
@@ -163,6 +167,18 @@ func (s *HttpServer) handleMutationRequest(response http.ResponseWriter, request
 
 		patchedObjectBytes = result.Patched
 		jsonPatchOperations = append(jsonPatchOperations, result.Operations...)
+
+		// The next policy sees what this one just did, which is what makes the priority mean
+		// something. Disabled, every policy reads the object as it arrived
+		if s.dependencies.ComposeMutations {
+			composed := map[string]any{}
+			if unmarshalErr := json.Unmarshal(result.Patched, &composed); unmarshalErr != nil {
+				logger.Info(fmt.Sprintf("failed reading the object after the patch: %s", unmarshalErr.Error()))
+				continue
+			}
+
+			commonTemplateInjectedObject.Object = composed
+		}
 	}
 
 	// All working mutation patches are collected from policies, send them to Kubernetes

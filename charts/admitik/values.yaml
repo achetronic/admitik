@@ -23,6 +23,11 @@ controller:
 
   imagePullSecrets: []
 
+  # Delete the webhook configurations when the release is uninstalled. They are created by the
+  # controller, so Helm does not know about them and they would stay pointing to a Service that
+  # is gone. With a failure policy of Fail, the cluster would reject the intercepted resources
+  cleanupWebhooksOnUninstall: true
+
   # Extra args to pass to the controller.
   # Ref: https://github.com/admitikcore/admitik/blob/master/docs/configuration.md
   # Example:

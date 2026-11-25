@@ -1,0 +1,83 @@
+{{- /*
+The controller creates the webhook configurations, so Helm cannot delete them on uninstall.
+They would stay pointing to a Service that is gone and, with a failure policy of Fail, the
+cluster would reject every object of the intercepted types.
+
+The job runs after the release is deleted, so the controller is not there to write them again.
+*/ -}}
+{{- if .Values.controller.cleanupWebhooksOnUninstall }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "admitik.fullname" . }}-cleanup
+  labels:
+    {{- include "admitik.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-delete
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "admitik.fullname" . }}-cleanup
+  labels:
+    {{- include "admitik.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-delete
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["validatingwebhookconfigurations", "mutatingwebhookconfigurations"]
+    verbs: ["get", "list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "admitik.fullname" . }}-cleanup
+  labels:
+    {{- include "admitik.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-delete
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "admitik.fullname" . }}-cleanup
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "admitik.fullname" . }}-cleanup
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "admitik.fullname" . }}-cleanup
+  labels:
+    {{- include "admitik.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-delete
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "admitik.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "admitik.fullname" . }}-cleanup
+      restartPolicy: Never
+      securityContext:
+        {{- toYaml .Values.controller.podSecurityContext | nindent 8 }}
+      containers:
+        - name: cleanup
+          image: "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
+          imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
+          args:
+            - --cleanup-webhooks
+          securityContext:
+            {{- toYaml .Values.controller.securityContext | nindent 12 }}
+{{- end }}
