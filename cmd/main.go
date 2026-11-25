@@ -166,9 +166,9 @@ func main() {
 	flag.StringVar(&excludedAdmissionNamespaces, "excluded-admission-namespaces", "",
 		"Comma-separated list of namespaces to be excluded from admission evaluations. Commonly used for 'kube-system'")
 
-	flag.BoolVar(&composeMutations, "compose-mutations", true,
+	flag.BoolVar(&composeMutations, "compose-mutations", false,
 		"Make every mutation policy see the object as the previous ones left it. "+
-			"Disabled, every policy evaluates the object as it arrived")
+			"Without it, every policy evaluates the object as it arrived")
 
 	flag.BoolVar(&cleanupWebhooks, "cleanup-webhooks", false,
 		"Delete the webhook configurations and exit. Used by the chart to clean up after an uninstall")

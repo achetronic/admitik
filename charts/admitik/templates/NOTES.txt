@@ -1,0 +1,16 @@
+Admitik is running in the namespace {{ .Release.Namespace }}.
+
+Policies are cluster scoped. Create one and the webhook configurations appear by themselves:
+
+  kubectl apply -f https://github.com/admitikcore/admitik/tree/master/docs/samples
+
+The webhook configurations are created by the controller, so Helm does not manage them.
+{{- if .Values.controller.cleanupWebhooksOnUninstall }}
+This chart deletes them when you uninstall, so the cluster does not keep calling a Service
+that is gone.
+{{- else }}
+You disabled cleanupWebhooksOnUninstall, so delete them by hand before uninstalling:
+
+  kubectl delete validatingwebhookconfiguration admitik-cluster-validation-policy
+  kubectl delete mutatingwebhookconfiguration admitik-cluster-mutation-policy
+{{- end }}

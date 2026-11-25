@@ -28,6 +28,7 @@ They are described in the following table:
 | `--enable-special-labels`              | Enable labels that perform sensitive actions                                          |        `false`         |
 | `--exclude-admission-self-namespace`   | Exclude Admitik resources from admission evaluations                                  |        `false`         |
 | `--excluded-admission-namespaces`      | Comma-separated list of namespaces to be excluded from admission evaluations          |          `-`           |
+| `--compose-mutations`                  | Let every mutation policy see the object the previous ones left                |        `false`         |
 | `--compliance-scan-interval`           | Interval between scans of the objects that already exist. `0` disables them           |          `0`           |
 
 ## Logs
