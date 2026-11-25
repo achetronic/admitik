@@ -25,7 +25,7 @@ Admitik is a cloud native policy engine for Kubernetes that lets you define poli
 It uses template engines (CEL, Starlark, Go templates) to apply logic, patch resources, or generate
 new ones, all directly inside your cluster.
 
-No new languages to learn. No sidecars. No external database. Just Kubernetes-native power. 💪
+No new languages to learn. No sidecars. Just Kubernetes-native power. 💪
 
 ## ✨ What can Admitik do?
 
@@ -105,29 +105,17 @@ These variables let you write dynamic, context-aware policies using real cluster
 `ClusterCleanupPolicy` is not here yet. Until it lands, deleting a generation policy is how you
 remove what it wrote, with `deletionPolicy: Delete`.
 
-## 🧪 Examples
-
-Each use case in the docs carries the policy, the explanation, and the reasoning behind it:
-
-- [Deny privileged containers](https://admitik.dev/use-cases/deny-privileged-pods/)
-- [Require an owner label on every namespace](https://admitik.dev/use-cases/require-team-label/)
-- [Reject HTTPRoutes that collide with an existing one](https://admitik.dev/use-cases/avoid-colliding-httproutes/)
-- [Cap the replicas of a Deployment with a namespace label](https://admitik.dev/use-cases/cap-replicas-from-namespace/)
-- [Generate a ConfigMap in every new namespace](https://admitik.dev/use-cases/generate-configmap-per-namespace/)
-- [Ship container logs to FluentD without touching the app](https://admitik.dev/use-cases/centralized-logging-with-fluentbit/)
-
-👉 The rest are in the [use case catalogue](https://admitik.dev/use-cases/).
-
 ## 📚 Documentation
 
 The full documentation lives at **[admitik.dev](https://admitik.dev)**:
 
 | Page | What you find |
-|--------------------------------------------|----------------------------------------------------------------|
+|---|---|
 | [Installation](https://admitik.dev/docs/installation/) | Helm chart, bundle, and how to remove them. |
 | [Concepts](https://admitik.dev/docs/concepts/) | What a policy is made of: sources, conditions, engines, triggers. |
 | [Policies](https://admitik.dev/docs/policies/) | Validation, mutation, generation, clone and cleanup. |
 | [Configuration](https://admitik.dev/docs/configuration/) | Flags and their defaults. |
+| [Use cases](https://admitik.dev/use-cases/) | Working policies with their explanation, to copy and adapt. |
 | [Observability](https://admitik.dev/docs/observability/) | Metrics and the log contract. |
 
 ## 📦 Installation
